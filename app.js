@@ -130,6 +130,8 @@ const getProfile = () => db.profiles.find((p) => p.id === activeProfileId) || db
 
 const id = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const day = (d) => (d || new Date()).toISOString().slice(0, 10);
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 const esc = (s) => (s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 function toast(title, body = '') {
@@ -215,7 +217,12 @@ function showNotifyBanner() {
 }
 
 $('#notifyBtn').onclick = async () => {
-  if (!('Notification' in window)) return toast('Notifications unavailable', 'This browser does not support them.');
+  if (!('Notification' in window)) {
+    if (isIOS() && !isStandalone()) {
+      return toast('📲 Add Daysie to your Home Screen', 'On iPhone, tap the Share icon, then "Add to Home Screen", and open Daysie from there to turn on notifications.');
+    }
+    return toast('Notifications unavailable', 'This browser does not support them.');
+  }
   const p = await Notification.requestPermission();
   showNotifyBanner();
   toast(p === 'granted' ? '🔔 Reminders on!' : 'No problem', 'In-app alerts will still show while Daysie is open.');
@@ -1031,6 +1038,7 @@ $('#settingsBtn').onclick = () => {
 };
 
 $('#closeSettings').onclick = () => $('#settingsDialog').close();
+$('#closeSettingsTop').onclick = () => $('#settingsDialog').close();
 
 // SYNC & AUTH
 function updateSyncStatus() {
@@ -1173,7 +1181,15 @@ async function pullFromCloud() {
 
 // PUSH NOTIFICATIONS
 $('#subscribePushBtn').onclick = async () => {
-  if (!settings.authToken) return toast('Sign in first', 'You need an account to use push notifications.');
+  if (!settings.authToken) {
+    toast('🔑 Please sign in first', 'Enter your email under "Sync & account" above to create an account, then enable push.');
+    $('#authEmail')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    $('#authEmail')?.focus();
+    return;
+  }
+  if (isIOS() && !isStandalone()) {
+    return toast('📲 Add Daysie to your Home Screen', 'On iPhone, push only works after you add Daysie to your Home Screen (Share, then Add to Home Screen) and open it from there.');
+  }
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return toast('Not supported', 'Your browser does not support push notifications.');
 
   try {
