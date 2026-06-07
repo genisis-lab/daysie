@@ -30,7 +30,7 @@
     <div class="welcome-grid">
       <article><b>⏰ Friendly reminders</b><span>Set a task, time, repeat, and priority.</span></article>
       <article><b>📖 Cozy journal</b><span>Track moods, prompts, tags, and memories.</span></article>
-      <article><b>👨‍👩‍👧 Family profiles</b><span>Color-coded profiles for everyone.</span></article>
+      <article><b>👨‍👩‍👧 Family linking</b><span>Link accounts to share tasks &amp; lists.</span></article>
       <article><b>☁️ Sync across devices</b><span>Optional account keeps everything in sync.</span></article>
     </div>
     <input id="nameInput" maxlength="24" placeholder="What should Daysie call you?" />
@@ -45,7 +45,7 @@
         <div><h1>Daysie</h1><p>remember · reflect · grow</p></div>
       </div>
       <div class="topbar-right">
-        <button id="profileBtn" class="profile-btn" title="Switch profile"><span id="profileEmoji">🌼</span><span id="profileName">Me</span></button>
+        <button id="profileBtn" class="profile-btn" title="Family"><span id="profileEmoji">🌼</span><span id="profileName">Me</span></button>
         <button id="settingsBtn" class="icon-btn" title="Settings">⚙️</button>
       </div>
     </header>
@@ -85,6 +85,18 @@
       <div class="section-head"><h2>📝 Shared lists</h2><button id="manageListsBtn" class="soft small" type="button">Manage</button></div>
       <div id="listsList" class="lists-list"></div>
 
+      <!-- FROM FAMILY (assigned tasks & reminders sent to me) -->
+      <div id="familyInboxSection" class="hidden">
+        <div class="section-head"><h2>📬 From family</h2></div>
+        <div id="familyInbox"></div>
+      </div>
+
+      <!-- FAMILY LISTS (shared across linked accounts) -->
+      <div id="familyListsSection" class="hidden">
+        <div class="section-head"><h2>👪 Family lists</h2></div>
+        <div id="familyListsList" class="lists-list"></div>
+      </div>
+
       <!-- ON THIS DAY -->
       <div id="onThisDaySection" class="hidden">
         <div class="section-head"><h2>🕰️ On this day</h2></div>
@@ -113,7 +125,6 @@
         <button class="chip-filter" data-filter="today">Today</button>
         <button class="chip-filter" data-filter="high">🌸 Important</button>
         <button class="chip-filter" data-filter="birthday">🎂 Birthdays</button>
-        <button class="chip-filter" data-filter="everyone">👪 Everyone</button>
       </div>
       <div id="taskList"></div>
     </section>
@@ -259,18 +270,56 @@
     </div>
   </dialog>
 
-  <!-- PROFILE MODAL -->
-  <dialog id="profileDialog">
+  <!-- FAMILY MODAL -->
+  <dialog id="familyDialog">
     <div class="modal">
-      <h2>👨‍👩‍👧 Family profiles</h2>
-      <div id="profileList" class="profile-list"></div>
-      <div class="add-profile">
-        <input id="newProfileName" maxlength="20" placeholder="Name (e.g. Grandma, Dad)" />
-        <div id="profileColorPicker" class="profile-colors"></div>
-        <div id="profileEmojiPicker" class="profile-emojis"></div>
-        <button type="button" id="addProfileBtn" class="primary wide">Add profile ✨</button>
+      <div class="modal-head">
+        <h2>👨‍👩‍👧 Family</h2>
+        <button type="button" id="closeFamilyDialog" class="modal-close" title="Close" aria-label="Close">✕</button>
       </div>
-      <button type="button" id="closeProfileDialog" class="soft wide" style="margin-top:10px">Done</button>
+
+      <div id="familySyncGate" class="hidden">
+        <p style="color:var(--soft);font-weight:700">Turn on sync first to link family members. Open Settings → ☁️ Turn on sync, then come back here.</p>
+      </div>
+
+      <div id="familyBody">
+        <h3>🙂 Your profile</h3>
+        <label>Your name<input id="famMeName" maxlength="20" placeholder="e.g. Mom, Dad, Alex" /></label>
+        <p class="label">Icon</p>
+        <div id="famEmojiPicker" class="profile-emojis"></div>
+        <p class="label">Color</p>
+        <div id="famColorPicker" class="profile-colors"></div>
+        <button type="button" id="famSaveMeBtn" class="soft wide" style="margin-top:8px">Save my profile</button>
+
+        <hr style="border-color:var(--line);margin:16px 0" />
+        <h3>👪 Your family</h3>
+        <div id="familyMembers" class="family-members"></div>
+        <div class="row" style="margin-top:10px">
+          <button type="button" id="famInviteBtn" class="primary">➕ Invite a member</button>
+          <button type="button" id="familyLeaveBtn" class="soft hidden">Leave family</button>
+        </div>
+        <div id="famInviteWrap" class="hidden" style="margin-top:10px">
+          <p style="color:var(--soft)">Share this code. On their device: Family → Join with a code.</p>
+          <div id="famInviteCode" class="pair-code"></div>
+          <p id="famInviteExpiry" style="text-align:center;color:var(--soft);font-size:.85rem"></p>
+        </div>
+
+        <hr style="border-color:var(--line);margin:16px 0" />
+        <h3>🔗 Join a family</h3>
+        <label>Enter a family member's code
+          <input id="famJoinCode" maxlength="7" placeholder="AB12CD" autocomplete="off" autocapitalize="characters" style="text-align:center;letter-spacing:.3em;font-size:1.3rem;text-transform:uppercase" />
+        </label>
+        <button type="button" id="famJoinBtn" class="primary wide" style="margin-top:6px">Join family 🔗</button>
+
+        <hr style="border-color:var(--line);margin:16px 0" />
+        <h3>🔔 Send a reminder</h3>
+        <label>To<select id="remindMember" class="fam-select"></select></label>
+        <label>Reminder<input id="remindText" maxlength="80" placeholder="e.g. Take your medicine" /></label>
+        <label>When (optional)<input id="remindWhen" type="datetime-local" /></label>
+        <button type="button" id="famRemindBtn" class="soft wide" style="margin-top:6px">Send reminder 🔔</button>
+      </div>
+
+      <button type="button" id="closeFamily" class="soft wide" style="margin-top:14px">Done</button>
     </div>
   </dialog>
 
@@ -426,5 +475,6 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" defer></script>
   <script src="app.js" defer></script>
     <script defer src="app2.js"></script>
+    <script defer src="app3.js"></script>
 </body>
 </html>
