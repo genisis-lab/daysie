@@ -1610,3 +1610,23 @@ body[data-theme="dark"] .cal-day.today { background: linear-gradient(135deg, #3a
 .tour-dots i.on { background: var(--sun2, #f3ad32); width: 22px; border-radius: 5px; }
 .tour-actions { display: flex; gap: 10px; }
 .tour-actions button { flex: 1; }
+
+/* ===== Family (linked accounts) ===== */
+.family-members { display: flex; flex-direction: column; gap: 8px; }
+.family-member { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--card, #fff); border: 1px solid var(--line); border-radius: 14px; }
+.family-member .profile-avatar { width: 38px; height: 38px; min-width: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; }
+.family-member .profile-info { display: flex; flex-direction: column; line-height: 1.2; }
+.family-member .profile-info small { color: var(--soft); }
+
+.pair-code { text-align: center; font-size: 2rem; letter-spacing: .35em; font-weight: 800; padding: 10px 6px; background: var(--soft-bg, #fff7ed); border: 2px dashed var(--line); border-radius: 14px; text-transform: uppercase; }
+
+.fam-select { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card, #fff); color: inherit; font: inherit; }
+
+/* From-family inbox cards */
+.inbox-card { background: var(--card, #fff); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,.04); }
+.inbox-head { display: flex; align-items: flex-start; gap: 10px; }
+.inbox-head b { display: block; }
+.inbox-head small { color: var(--soft); }
+.inbox-icon { font-size: 1.3rem; line-height: 1.2; }
+.inbox-note { margin: 8px 0 0; color: var(--soft); font-size: .92rem; white-space: pre-wrap; }
+.inbox-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
