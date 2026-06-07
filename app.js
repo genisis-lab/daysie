@@ -70,7 +70,7 @@ let settings = {
   theme: 'light',
   font: 'normal',
   authToken: null,
-  userEmail: null,
+  userId: null,
   pushSubscription: null,
 };
 
@@ -627,9 +627,9 @@ function renderCalendar() {
 
   // Next month days
   const totalCells = Math.ceil((firstDay + daysInMonth) / 7) * 7;
-  let nextDay = 1;
+  let nextDayNum = 1;
   for (let i = firstDay + daysInMonth; i < totalCells; i++) {
-    html += `<div class="cal-day other-month">${nextDay++}</div>`;
+    html += `<div class="cal-day other-month">${nextDayNum++}</div>`;
   }
 
   $('#calGrid').innerHTML = html;
@@ -1040,7 +1040,14 @@ $('#settingsBtn').onclick = () => {
 $('#closeSettings').onclick = () => $('#settingsDialog').close();
 $('#closeSettingsTop').onclick = () => $('#settingsDialog').close();
 
-// SYNC & AUTH
+// SYNC & AUTH (device pairing — no email)
+const API = 'https://daysie-api.neil27.workers.dev';
+let pairPoll = null; // source device: polling for a pending request
+let statusPoll = null; // new device: polling for approval
+
+function stopPairPolling() { if (pairPoll) { clearInterval(pairPoll); pairPoll = null; } }
+function stopStatusPolling() { if (statusPoll) { clearInterval(statusPoll); statusPoll = null; } }
+
 function updateSyncStatus() {
   if (settings.authToken) {
     $('#syncStatus').classList.remove('hidden');
@@ -1051,89 +1058,168 @@ function updateSyncStatus() {
 }
 
 function updateAccountUI() {
-  if (settings.authToken && settings.userEmail) {
+  if (settings.authToken) {
     $('#loggedOutSection').classList.add('hidden');
     $('#loggedInSection').classList.remove('hidden');
-    $('#accountEmail').textContent = settings.userEmail;
   } else {
     $('#loggedOutSection').classList.remove('hidden');
     $('#loggedInSection').classList.add('hidden');
-    $('#magicCodeSection').classList.add('hidden');
+    $('#enterCodeSection')?.classList.add('hidden');
+    $('#linkCodeSection')?.classList.add('hidden');
   }
 }
 
-$('#sendMagicLink').onclick = async () => {
-  const email = $('#authEmail').value.trim();
-  if (!email || !email.includes('@')) return toast('Invalid email', 'Please enter a valid email address.');
-
-  toast('📧 Sending magic link...', 'Check your inbox!');
-
+// Turn on sync: create a fresh account on this device (becomes the owner)
+$('#enableSyncBtn').onclick = async () => {
+  toast('☁️ Turning on sync...', '');
   try {
-    // Call Cloudflare Worker auth endpoint
-    const res = await fetch('https://daysie-api.neil27.workers.dev/auth/request', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
-    });
-
-    if (res.ok) {
-      $('#magicCodeSection').classList.remove('hidden');
-      toast('✅ Code sent!', 'Check your email for a 6-digit code.');
-    } else {
-      toast('❌ Failed', 'Could not send code. Check the Worker URL.');
-    }
+    const res = await fetch(`${API}/account/create`, { method: 'POST' });
+    if (!res.ok) throw new Error('create failed');
+    const data = await res.json();
+    settings.authToken = data.token;
+    settings.userId = data.userId;
+    saveSettings();
+    updateAccountUI();
+    updateSyncStatus();
+    toast('🎉 Sync is on!', 'Now link your other devices with a code.');
+    syncToCloud();
   } catch (e) {
     console.error(e);
-    toast('❌ Network error', 'Make sure the Cloudflare Worker is deployed.');
+    toast('❌ Could not turn on sync', 'Check your connection and try again.');
   }
 };
 
-$('#verifyCode').onclick = async () => {
-  const email = $('#authEmail').value.trim();
-  const code = $('#magicCode').value.trim();
-  if (!code || code.length !== 6) return toast('Invalid code', 'Enter the 6-digit code.');
+// New device: reveal the "enter code" box
+$('#haveCodeBtn').onclick = () => {
+  $('#enterCodeSection').classList.toggle('hidden');
+  $('#pairCodeInput')?.focus();
+};
 
-  toast('🔑 Verifying...', '');
-
+// New device: submit a pairing code, then wait for the source device to approve
+$('#redeemCodeBtn').onclick = async () => {
+  const code = ($('#pairCodeInput').value || '').trim().toUpperCase().replace(/\s/g, '');
+  if (code.length < 6) return toast('Invalid code', 'Enter the code shown on your other device.');
+  const status = $('#redeemStatus');
+  status.classList.remove('hidden');
+  status.textContent = '⏳ Waiting for the other device to approve…';
   try {
-    const res = await fetch('https://daysie-api.neil27.workers.dev/auth/verify', {
+    const res = await fetch(`${API}/pair/redeem`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, code }),
+      body: JSON.stringify({ code }),
     });
+    if (res.status === 429) { status.textContent = '⛔ Too many attempts. Wait a minute and try again.'; return; }
+    if (!res.ok) { status.textContent = '❌ That code didn’t work. Double-check it and try again.'; return; }
 
-    if (res.ok) {
-      const data = await res.json();
-      settings.authToken = data.token;
-      settings.userEmail = email;
-      saveSettings();
-      updateAccountUI();
-      updateSyncStatus();
-      toast('🎉 Signed in!', 'Your data will now sync across devices.');
-      syncToCloud();
-      pullFromCloud();
-    } else {
-      toast('❌ Invalid code', 'Please try again.');
-    }
+    const started = Date.now();
+    stopStatusPolling();
+    statusPoll = setInterval(async () => {
+      if (Date.now() - started > 3 * 60 * 1000) { stopStatusPolling(); status.textContent = '⌛ Code expired. Ask for a fresh one.'; return; }
+      try {
+        const r = await fetch(`${API}/pair/status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code }),
+        });
+        const d = await r.json();
+        if (d.status === 'approved') {
+          stopStatusPolling();
+          settings.authToken = d.token;
+          settings.userId = d.userId;
+          saveSettings();
+          updateAccountUI();
+          updateSyncStatus();
+          status.textContent = '';
+          toast('🎉 Connected!', 'This device is now synced.');
+          await pullFromCloud();
+        } else if (d.status === 'expired') {
+          stopStatusPolling();
+          status.textContent = '⌛ Code expired. Ask for a fresh one.';
+        } else if (d.status === 'gone') {
+          stopStatusPolling();
+          status.textContent = '🚫 Request denied or the code is no longer valid.';
+        }
+      } catch (e) { /* keep polling */ }
+    }, 3000);
   } catch (e) {
     console.error(e);
-    toast('❌ Error', 'Could not verify code.');
+    status.textContent = '❌ Network error. Try again.';
+  }
+};
+
+// Source device: create a code, then watch for a device asking to connect
+$('#linkDeviceBtn').onclick = async () => {
+  try {
+    const res = await fetch(`${API}/pair/create`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${settings.authToken}` },
+    });
+    if (!res.ok) return toast('❌ Could not create a code', 'Try again.');
+    const data = await res.json();
+    $('#linkCodeDisplay').textContent = data.code;
+    const mins = Math.max(1, Math.round((data.expires - Date.now()) / 60000));
+    $('#linkCodeExpiry').textContent = `Code expires in about ${mins} min`;
+    $('#linkCodeSection').classList.remove('hidden');
+
+    const started = Date.now();
+    stopPairPolling();
+    pairPoll = setInterval(async () => {
+      if (Date.now() - started > 3 * 60 * 1000) { stopPairPolling(); $('#linkCodeSection').classList.add('hidden'); return; }
+      try {
+        const r = await fetch(`${API}/pair/pending`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${settings.authToken}` },
+        });
+        const d = await r.json();
+        if (d.pending && d.code) {
+          stopPairPolling();
+          confirm(
+            '🔗',
+            'New device wants to connect',
+            'Someone just entered your code on another device. Approve only if it’s you or someone you trust.',
+            async () => {
+              await fetch(`${API}/pair/approve`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.authToken}` },
+                body: JSON.stringify({ code: d.code }),
+              });
+              $('#linkCodeSection').classList.add('hidden');
+              toast('✅ Device approved!', 'Your other device is now syncing.');
+            },
+            async () => {
+              await fetch(`${API}/pair/deny`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.authToken}` },
+                body: JSON.stringify({ code: d.code }),
+              });
+              $('#linkCodeSection').classList.add('hidden');
+              toast('🚫 Request denied', '');
+            }
+          );
+        }
+      } catch (e) { /* keep polling */ }
+    }, 3000);
+  } catch (e) {
+    console.error(e);
+    toast('❌ Network error', 'Try again.');
   }
 };
 
 $('#signOutBtn').onclick = () => {
   confirm(
     '☁️',
-    'Sign out?',
-    'Local data will remain on this device.',
+    'Turn off sync on this device?',
+    'Your data stays on this device. Other linked devices keep syncing.',
     () => {
+      stopPairPolling();
+      stopStatusPolling();
       settings.authToken = null;
-      settings.userEmail = null;
+      settings.userId = null;
       settings.pushSubscription = null;
       saveSettings();
       updateAccountUI();
       updateSyncStatus();
-      toast('👋 Signed out', '');
+      toast('👋 Sync turned off', '');
     },
     () => {}
   );
@@ -1145,6 +1231,9 @@ $('#syncNowBtn').onclick = async () => {
   await pullFromCloud();
   toast('✅ Synced!', '');
 };
+
+// Stop any pairing polls when the settings dialog is closed
+$('#settingsDialog')?.addEventListener('close', () => { stopPairPolling(); stopStatusPolling(); });
 
 async function syncToCloud() {
   if (!settings.authToken) return;
@@ -1182,9 +1271,9 @@ async function pullFromCloud() {
 // PUSH NOTIFICATIONS
 $('#subscribePushBtn').onclick = async () => {
   if (!settings.authToken) {
-    toast('🔑 Please sign in first', 'Enter your email under "Sync & account" above to create an account, then enable push.');
-    $('#authEmail')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    $('#authEmail')?.focus();
+    toast('🔑 Turn on sync first', 'Tap "Turn on sync" under "Sync & account" above, then enable push.');
+    $('#enableSyncBtn')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    $('#enableSyncBtn')?.focus();
     return;
   }
   if (isIOS() && !isStandalone()) {

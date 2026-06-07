@@ -259,28 +259,35 @@
       <h3>☁️ Sync & account</h3>
       <div id="accountSection">
         <div id="loggedOutSection">
-          <p style="color:var(--soft)">Sign in with a magic link to sync Daysie across all your devices. No password needed!</p>
-          <label>Your email
-            <input type="email" id="authEmail" placeholder="you@example.com" />
-          </label>
-          <button type="button" id="sendMagicLink" class="primary wide">Send magic link ✉️</button>
-          <div id="magicCodeSection" class="hidden" style="margin-top:12px">
-            <label>Enter the 6-digit code from your email
-              <input id="magicCode" maxlength="6" placeholder="123456" inputmode="numeric" style="text-align:center;letter-spacing:.3em;font-size:1.4rem" />
+          <p style="color:var(--soft)">Sync Daysie across your devices — no email, no password. Turn on sync here, then link your other devices with a short code.</p>
+          <button type="button" id="enableSyncBtn" class="primary wide">☁️ Turn on sync</button>
+          <div style="text-align:center;margin:10px 0;color:var(--soft)">— or —</div>
+          <button type="button" id="haveCodeBtn" class="soft wide">🔢 I have a code from another device</button>
+          <div id="enterCodeSection" class="hidden" style="margin-top:12px">
+            <label>Enter the code shown on your other device
+              <input id="pairCodeInput" maxlength="7" placeholder="AB12CD" autocomplete="off" autocapitalize="characters" style="text-align:center;letter-spacing:.3em;font-size:1.4rem;text-transform:uppercase" />
             </label>
-            <button type="button" id="verifyCode" class="primary wide">Verify & sign in 🔑</button>
+            <button type="button" id="redeemCodeBtn" class="primary wide">Connect this device 🔗</button>
+            <p id="redeemStatus" class="hidden" style="margin-top:8px;color:var(--soft);text-align:center"></p>
           </div>
         </div>
         <div id="loggedInSection" class="hidden">
           <div class="account-card">
             <span>☁️</span>
             <div>
-              <b id="accountEmail"></b>
-              <small>Synced across devices</small>
+              <b>Sync is on</b>
+              <small>Synced across your linked devices</small>
             </div>
           </div>
+          <button type="button" id="linkDeviceBtn" class="primary wide" style="margin:8px 0">➕ Link another device</button>
+          <div id="linkCodeSection" class="hidden" style="margin:4px 0 8px">
+            <p style="color:var(--soft)">On your other device, open Daysie → Settings → “I have a code” and enter:</p>
+            <div id="linkCodeDisplay" style="text-align:center;font-size:2rem;letter-spacing:.3em;font-weight:800"></div>
+            <p id="linkCodeExpiry" style="text-align:center;color:var(--soft);font-size:.85rem;margin:4px 0"></p>
+            <p style="text-align:center;color:var(--soft)">Waiting for the other device…</p>
+          </div>
           <button type="button" id="syncNowBtn" class="soft wide" style="margin:8px 0">🔄 Sync now</button>
-          <button type="button" id="signOutBtn" class="soft wide">Sign out</button>
+          <button type="button" id="signOutBtn" class="soft wide">Turn off sync on this device</button>
         </div>
       </div>
 
