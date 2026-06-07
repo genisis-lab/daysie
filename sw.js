@@ -1,19 +1,22 @@
 // Daysie Service Worker - update-friendly caching + push notifications
 //
 // Strategy:
-//  - Same-origin app files (HTML/JS/CSS): NETWORK-FIRST. When online, the user
-//    always gets the freshly deployed files on reload, so updates apply without
-//    clearing site data (which used to wipe the saved name/profile). Falls back
-//    to cache when offline.
+//  - Same-origin app files (HTML/JS/CSS/JSON): NETWORK-FIRST with `cache: 'no-store'`
+//    so a reload ALWAYS pulls the freshly deployed files. The previous version
+//    let the browser's HTTP cache keep serving a stale app.js even after a
+//    reload, so version.json (fetched no-store) reported a new build while the
+//    running APP_VERSION never changed -- which made the "new version" banner
+//    stick forever, even after tapping Refresh. Falls back to cache offline.
 //  - Cross-origin assets (e.g. the three.js CDN): cache-first (they're immutable).
 //  - We do NOT auto-skipWaiting; the page shows an update banner and asks this
 //    worker to activate only when the user taps "Refresh".
-const CACHE_NAME = 'daysie-v4';
+const CACHE_NAME = 'daysie-v5';
 const CORE = [
   './',
   './index.html',
   './styles.css',
   './app.js',
+  './app2.js',
   './favicon.svg',
   './site.webmanifest',
   './version.json',
@@ -49,10 +52,12 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(req.url);
 
-  // Network-first for our own files so new deploys load on a normal reload.
+  // Network-first (no-store) for our own files so new deploys always win on a
+  // normal reload. We still copy successful responses into the cache for
+  // offline use.
   if (url.origin === self.location.origin) {
     event.respondWith(
-      fetch(req)
+      fetch(req, { cache: 'no-store' })
         .then((res) => {
           if (res && res.status === 200 && res.type === 'basic') {
             const copy = res.clone();
