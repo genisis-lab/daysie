@@ -313,6 +313,15 @@
     </div>
   </dialog>
 
+  <!-- PHOTO LIGHTBOX -->
+  <div id="lightbox" class="lightbox hidden" role="dialog" aria-modal="true" aria-label="Photo viewer">
+    <button type="button" id="lightboxClose" class="lightbox-close" title="Close" aria-label="Close">✕</button>
+    <button type="button" id="lightboxPrev" class="lightbox-nav prev hidden" aria-label="Previous photo">‹</button>
+    <img id="lightboxImg" alt="Journal photo" />
+    <button type="button" id="lightboxNext" class="lightbox-nav next hidden" aria-label="Next photo">›</button>
+    <div id="lightboxCount" class="lightbox-count"></div>
+  </div>
+
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" defer></script>
   <script src="app.js" defer></script>
 </body>
