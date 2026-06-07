@@ -122,7 +122,7 @@ export default {
       return json({ error: 'Not found' }, 404, corsHeaders);
     } catch (error) {
       console.error('Worker error:', error);
-      return json({ error: 'Internal server error' }, 500, corsHeaders);
+      return json({ error: error.message || 'Internal server error' }, 500, corsHeaders);
     }
   },
 
@@ -197,29 +197,37 @@ function json(data, status = 200, headers = {}) {
   });
 }
 
-// Helper: Send email via MailChannels
+// Helper: Send email via Resend (https://resend.com)
+// Requires a Worker secret RESEND_API_KEY. Optionally set EMAIL_FROM
+// (e.g. "Daysie <hello@yourdomain.com>"). Until you verify a domain in
+// Resend, you can only send from 'onboarding@resend.dev' to your own
+// account email, so a verified domain is recommended for real use.
 async function sendEmail(env, email, code) {
-  try {
-    const emailBody = {
-      personalizations: [{ to: [{ email }] }],
-      from: { email: 'noreply@daysie.app', name: 'Daysie' },
-      subject: 'Your Daysie sign-in code',
-      content: [
-        {
-          type: 'text/plain',
-          value: `Hi!\n\nYour Daysie sign-in code is: ${code}\n\nThis code expires in 10 minutes.\n\nIf you didn't request this, please ignore this email.\n\n🌼 Daysie`,
-        },
-      ],
-    };
+  if (!env.RESEND_API_KEY) {
+    throw new Error('RESEND_API_KEY is not configured on the Worker');
+  }
 
-    await fetch('https://api.mailchannels.net/tx/v1/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(emailBody),
-    });
-  } catch (error) {
-    console.error('Email send error:', error);
-    // Don't throw - continue even if email fails
+  const from = env.EMAIL_FROM || 'Daysie <onboarding@resend.dev>';
+  const text = `Hi!\n\nYour Daysie sign-in code is: ${code}\n\nThis code expires in 10 minutes.\n\nIf you didn't request this, please ignore this email.\n\n🌼 Daysie`;
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+    },
+    body: JSON.stringify({
+      from,
+      to: [email],
+      subject: 'Your Daysie sign-in code',
+      text,
+    }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.text();
+    console.error('Resend error:', res.status, detail);
+    throw new Error('Email provider returned ' + res.status + ': ' + detail);
   }
 }
 
