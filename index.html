@@ -73,7 +73,17 @@
       <div id="weekAgenda" class="week-agenda"></div>
 
       <div class="section-head"><h2>☀️ Today's plan</h2><button class="primary small" data-open-task>+ Add</button></div>
+      <div class="quick-add">
+        <input id="quickAddToday" maxlength="120" placeholder="⚡ Quick add — e.g. Call mom tomorrow 5pm" />
+        <button type="button" id="quickAddTodayBtn" class="primary small">Add</button>
+      </div>
       <div id="todayTasks"></div>
+
+      <div class="section-head"><h2>🌱 Habits</h2><button id="manageHabitsBtn" class="soft small" type="button">Manage</button></div>
+      <div id="habitsList" class="habits-list"></div>
+
+      <div class="section-head"><h2>📝 Shared lists</h2><button id="manageListsBtn" class="soft small" type="button">Manage</button></div>
+      <div id="listsList" class="lists-list"></div>
 
       <!-- ON THIS DAY -->
       <div id="onThisDaySection" class="hidden">
@@ -94,11 +104,16 @@
         <h2>⏰ Reminders & tasks</h2>
         <button class="primary small" data-open-task>+ Add</button>
       </div>
+      <div class="quick-add">
+        <input id="quickAddTasks" maxlength="120" placeholder="⚡ Quick add — e.g. Pay rent on the 1st, water plants daily" />
+        <button type="button" id="quickAddTasksBtn" class="primary small">Add</button>
+      </div>
       <div class="filter-bar">
         <button class="chip-filter active" data-filter="all">All</button>
         <button class="chip-filter" data-filter="today">Today</button>
         <button class="chip-filter" data-filter="high">🌸 Important</button>
         <button class="chip-filter" data-filter="birthday">🎂 Birthdays</button>
+        <button class="chip-filter" data-filter="everyone">👪 Everyone</button>
       </div>
       <div id="taskList"></div>
     </section>
@@ -178,6 +193,8 @@
       </label>
       <p class="label">Category</p>
       <div id="categoryPicker" class="chips"></div>
+      <p class="label">Assign to</p>
+      <div id="assigneePicker" class="chips"></div>
       <div class="row">
         <label>Day<input id="taskDate" type="date" /></label>
         <label>Time<input id="taskTime" type="time" /></label>
@@ -323,6 +340,9 @@
         <button type="button" id="subscribePushBtn" class="soft wide">🔔 Enable push notifications</button>
       </div>
 
+      <hr style="border-color:var(--line);margin:18px 0" />
+      <button type="button" id="replayTourBtn" class="soft wide">🧭 Replay welcome tour</button>
+
       <button type="button" id="closeSettings" class="soft wide" style="margin-top:16px">Close</button>
     </div>
   </dialog>
@@ -343,6 +363,55 @@
       </div>
     </div>
   </dialog>
+
+  <!-- HABIT DIALOG -->
+  <dialog id="habitDialog">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>🌱 Habits</h2>
+        <button type="button" id="closeHabitDialog" class="modal-close" title="Close" aria-label="Close">✕</button>
+      </div>
+      <div id="habitManageList" class="manage-list"></div>
+      <hr style="border-color:var(--line);margin:14px 0" />
+      <label>New habit<input id="newHabitName" maxlength="40" placeholder="e.g. Drink water, Walk 20 min" /></label>
+      <p class="label">Icon</p>
+      <div id="habitEmojiPicker" class="profile-emojis"></div>
+      <p class="label">Color</p>
+      <div id="habitColorPicker" class="profile-colors"></div>
+      <button type="button" id="addHabitBtn" class="primary wide" style="margin-top:10px">Add habit 🌱</button>
+    </div>
+  </dialog>
+
+  <!-- SHARED LIST DIALOG -->
+  <dialog id="listDialog">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>📝 Shared lists</h2>
+        <button type="button" id="closeListDialog" class="modal-close" title="Close" aria-label="Close">✕</button>
+      </div>
+      <div id="listManageList" class="manage-list"></div>
+      <hr style="border-color:var(--line);margin:14px 0" />
+      <label>New list<input id="newListName" maxlength="40" placeholder="e.g. Groceries, Packing" /></label>
+      <p class="label">Icon</p>
+      <div id="listEmojiPicker" class="profile-emojis"></div>
+      <button type="button" id="addListBtn" class="primary wide" style="margin-top:10px">Create list 📝</button>
+    </div>
+  </dialog>
+
+  <!-- ONBOARDING TOUR -->
+  <div id="tourOverlay" class="tour-overlay hidden">
+    <div class="tour-card">
+      <button type="button" id="tourSkip" class="tour-skip">Skip</button>
+      <div id="tourIcon" class="tour-icon">🌼</div>
+      <h2 id="tourTitle">Welcome</h2>
+      <p id="tourBody"></p>
+      <div id="tourDots" class="tour-dots"></div>
+      <div class="tour-actions">
+        <button type="button" id="tourBack" class="soft hidden">← Back</button>
+        <button type="button" id="tourNext" class="primary">Next →</button>
+      </div>
+    </div>
+  </div>
 
   <!-- PHOTO LIGHTBOX -->
   <div id="lightbox" class="lightbox hidden" role="dialog" aria-modal="true" aria-label="Photo viewer">
