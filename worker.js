@@ -5,6 +5,8 @@
 // Extra devices are linked with a short code, with an approve-on-source-device
 // confirmation step before the new device is allowed in.
 
+let familySchemaReady = false;
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -12,7 +14,7 @@ export default {
 
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, DELETE, PUT, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     };
 
@@ -21,6 +23,8 @@ export default {
     }
 
     try {
+      await ensureFamilySchema(env);
+
       // ACCOUNT: create a fresh account on the first device (no email needed)
       if (path === '/account/create' && request.method === 'POST') {
         const userId = crypto.randomUUID();
@@ -225,6 +229,173 @@ export default {
         return json({ success: true }, 200, corsHeaders);
       }
 
+      // ============================ FAMILY ============================
+      // A "family" links several SEPARATE Daysie accounts so they can assign
+      // each other tasks, share lists, and send reminders. A user belongs to at
+      // most one family (family_members.user_id is the primary key).
+
+      // FAMILY: get my family + roster
+      if (path === '/family' && request.method === 'GET') {
+        const userId = await getUserFromAuth(request, env);
+        if (!userId) return json({ error: 'Unauthorized' }, 401, corsHeaders);
+        const mem = await env.DB.prepare('SELECT family_id FROM family_members WHERE user_id = ?').bind(userId).first();
+        if (!mem) return json({ familyId: null, members: [] }, 200, corsHeaders);
+        const rows = await env.DB.prepare('SELECT user_id, name, emoji, color FROM family_members WHERE family_id = ? ORDER BY joined ASC').bind(mem.family_id).all();
+        const members = rows.results.map((m) => ({ userId: m.user_id, name: m.name, emoji: m.emoji, color: m.color, isMe: m.user_id === userId }));
+        return json({ familyId: mem.family_id, members }, 200, corsHeaders);
+      }
+
+      // FAMILY: set/refresh my own display profile; creates a solo family if none
+      if (path === '/family/profile' && request.method === 'POST') {
+        const userId = await getUserFromAuth(request, env);
+        if (!userId) return json({ error: 'Unauthorized' }, 401, corsHeaders);
+        const { name, emoji, color } = await request.json();
+        const familyId = await getOrCreateFamily(env, userId, name, emoji, color);
+        await env.DB.prepare('UPDATE family_members SET name = ?, emoji = ?, color = ? WHERE user_id = ?')
+          .bind(name || 'Me', emoji || '😊', color || '#ffcd57', userId)
+          .run();
+        return json({ success: true, familyId }, 200, corsHeaders);
+      }
+
+      // FAMILY: create a short-lived invite code others can use to join my family
+      if (path === '/family/invite' && request.method === 'POST') {
+        const userId = await getUserFromAuth(request, env);
+        if (!userId) return json({ error: 'Unauthorized' }, 401, corsHeaders);
+        const body = await request.json().catch(() => ({}));
+        const familyId = await getOrCreateFamily(env, userId, body.name, body.emoji, body.color);
+        await env.DB.prepare('DELETE FROM family_invites WHERE family_id = ?').bind(familyId).run();
+        let code;
+        for (let i = 0; i < 5; i++) {
+          code = genCode(6);
+          const exists = await env.DB.prepare('SELECT code FROM family_invites WHERE code = ?').bind(code).first();
+          if (!exists) break;
+        }
+        const expires = Date.now() + 15 * 60 * 1000; // 15 minutes
+        await env.DB.prepare('INSERT INTO family_invites (code, family_id, created, expires) VALUES (?, ?, ?, ?)')
+          .bind(code, familyId, Date.now(), expires)
+          .run();
+        return json({ code, expires }, 200, corsHeaders);
+      }
+
+      // FAMILY: join a family using an invite code
+      if (path === '/family/join' && request.method === 'POST') {
+        const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+        const allowed = await checkRateLimit(env, 'fjoin:' + ip, 10, 60 * 1000);
+        if (!allowed) return json({ error: 'Too many attempts. Please wait a minute.' }, 429, corsHeaders);
+        const userId = await getUserFromAuth(request, env);
+        if (!userId) return json({ error: 'Unauthorized' }, 401, corsHeaders);
+        const { code, name, emoji, color } = await request.json();
+        const norm = (code || '').trim().toUpperCase();
+        if (!norm) return json({ error: 'Missing code' }, 400, corsHeaders);
+        const inv = await env.DB.prepare('SELECT * FROM family_invites WHERE code = ?').bind(norm).first();
+        if (!inv || inv.expires < Date.now()) {
+          if (inv) await env.DB.prepare('DELETE FROM family_invites WHERE code = ?').bind(norm).run();
+          return json({ error: 'Invalid or expired code' }, 404, corsHeaders);
+        }
+        await env.DB.prepare('INSERT OR REPLACE INTO family_members (family_id, user_id, name, emoji, color, joined) VALUES (?, ?, ?, ?, ?, ?)')
+          .bind(inv.family_id, userId, name || 'Me', emoji || '😊', color || '#ffcd57', Date.now())
+          .run();
+        const rows = await env.DB.prepare('SELECT user_id, name, emoji, color FROM family_members WHERE family_id = ? ORDER BY joined ASC').bind(inv.family_id).all();
+        const members = rows.results.map((m) => ({ userId: m.user_id, name: m.name, emoji: m.emoji, color: m.color, isMe: m.user_id === userId }));
+        return json({ success: true, familyId: inv.family_id, members }, 200, corsHeaders);
+      }
+
+      // FAMILY: leave my current family
+      if (path === '/family/leave' && request.method === 'POST') {
+        const userId = await getUserFromAuth(request, env);
+        if (!userId) return json({ error: 'Unauthorized' }, 401, corsHeaders);
+        await env.DB.prepare('DELETE FROM family_members WHERE user_id = ?').bind(userId).run();
+        return json({ success: true }, 200, corsHeaders);
+      }
+
+      // FAMILY: read shared lists for my family
+      if (path === '/family/lists' && request.method === 'GET') {
+        const userId = await getUserFromAuth(request, env);
+        if (!userId) return json({ error: 'Unauthorized' }, 401, corsHeaders);
+        const mem = await env.DB.prepare('SELECT family_id FROM family_members WHERE user_id = ?').bind(userId).first();
+        if (!mem) return json({ lists: [], updated: 0 }, 200, corsHeaders);
+        const row = await env.DB.prepare('SELECT lists, updated FROM family_data WHERE family_id = ?').bind(mem.family_id).first();
+        return json({ lists: row ? JSON.parse(row.lists) : [], updated: row ? row.updated : 0 }, 200, corsHeaders);
+      }
+
+      // FAMILY: replace shared lists for my family (last write wins)
+      if (path === '/family/lists' && request.method === 'PUT') {
+        const userId = await getUserFromAuth(request, env);
+        if (!userId) return json({ error: 'Unauthorized' }, 401, corsHeaders);
+        const mem = await env.DB.prepare('SELECT family_id FROM family_members WHERE user_id = ?').bind(userId).first();
+        if (!mem) return json({ error: 'Not in a family' }, 400, corsHeaders);
+        const { lists } = await request.json();
+        const now = Date.now();
+        await env.DB.prepare('INSERT OR REPLACE INTO family_data (family_id, lists, updated) VALUES (?, ?, ?)')
+          .bind(mem.family_id, JSON.stringify(lists || []), now)
+          .run();
+        return json({ success: true, updated: now }, 200, corsHeaders);
+      }
+
+      // FAMILY: assign a task to a member (delivers + pushes to them)
+      if (path === '/family/assign' && request.method === 'POST') {
+        const userId = await getUserFromAuth(request, env);
+        if (!userId) return json({ error: 'Unauthorized' }, 401, corsHeaders);
+        const mem = await env.DB.prepare('SELECT family_id FROM family_members WHERE user_id = ?').bind(userId).first();
+        if (!mem) return json({ error: 'Not in a family' }, 400, corsHeaders);
+        const { toUser, task } = await request.json();
+        const target = await env.DB.prepare('SELECT user_id FROM family_members WHERE user_id = ? AND family_id = ?').bind(toUser, mem.family_id).first();
+        if (!target) return json({ error: 'Member not found' }, 404, corsHeaders);
+        const id = crypto.randomUUID();
+        const now = Date.now();
+        await env.DB.prepare('INSERT INTO assigned_items (id, family_id, from_user, to_user, kind, payload, fire_at, status, notified, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+          .bind(id, mem.family_id, userId, toUser, 'task', JSON.stringify(task || {}), now, 'pending', 0, now)
+          .run();
+        await pushAssignedItem(env, { id, to_user: toUser, from_user: userId, kind: 'task', payload: JSON.stringify(task || {}) });
+        return json({ success: true, id }, 200, corsHeaders);
+      }
+
+      // FAMILY: send a reminder to a member (now or scheduled via cron)
+      if (path === '/family/remind' && request.method === 'POST') {
+        const userId = await getUserFromAuth(request, env);
+        if (!userId) return json({ error: 'Unauthorized' }, 401, corsHeaders);
+        const mem = await env.DB.prepare('SELECT family_id FROM family_members WHERE user_id = ?').bind(userId).first();
+        if (!mem) return json({ error: 'Not in a family' }, 400, corsHeaders);
+        const { toUser, title, fireAt } = await request.json();
+        const target = await env.DB.prepare('SELECT user_id FROM family_members WHERE user_id = ? AND family_id = ?').bind(toUser, mem.family_id).first();
+        if (!target) return json({ error: 'Member not found' }, 404, corsHeaders);
+        const id = crypto.randomUUID();
+        const now = Date.now();
+        const when = fireAt && fireAt > now ? fireAt : now;
+        const payload = JSON.stringify({ title: title || 'Reminder' });
+        await env.DB.prepare('INSERT INTO assigned_items (id, family_id, from_user, to_user, kind, payload, fire_at, status, notified, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+          .bind(id, mem.family_id, userId, toUser, 'reminder', payload, when, 'pending', 0, now)
+          .run();
+        if (when <= now) {
+          await pushAssignedItem(env, { id, to_user: toUser, from_user: userId, kind: 'reminder', payload });
+        }
+        return json({ success: true, id }, 200, corsHeaders);
+      }
+
+      // FAMILY: my inbox - items others assigned/sent to me
+      if (path === '/family/inbox' && request.method === 'GET') {
+        const userId = await getUserFromAuth(request, env);
+        if (!userId) return json({ error: 'Unauthorized' }, 401, corsHeaders);
+        const rows = await env.DB.prepare("SELECT id, from_user, kind, payload, fire_at, status, created FROM assigned_items WHERE to_user = ? AND status != 'done' ORDER BY created DESC LIMIT 100").bind(userId).all();
+        const items = [];
+        for (const it of rows.results) {
+          const from = await env.DB.prepare('SELECT name, emoji, color FROM family_members WHERE user_id = ?').bind(it.from_user).first();
+          items.push({ id: it.id, kind: it.kind, payload: JSON.parse(it.payload), fireAt: it.fire_at, status: it.status, created: it.created, from: from ? { name: from.name, emoji: from.emoji, color: from.color } : null });
+        }
+        return json({ items }, 200, corsHeaders);
+      }
+
+      // FAMILY: acknowledge/dismiss/complete an inbox item
+      if (path === '/family/inbox/ack' && request.method === 'POST') {
+        const userId = await getUserFromAuth(request, env);
+        if (!userId) return json({ error: 'Unauthorized' }, 401, corsHeaders);
+        const { id, status } = await request.json();
+        await env.DB.prepare('UPDATE assigned_items SET status = ? WHERE id = ? AND to_user = ?')
+          .bind(status || 'done', id, userId)
+          .run();
+        return json({ success: true }, 200, corsHeaders);
+      }
+
       return json({ error: 'Not found' }, 404, corsHeaders);
     } catch (error) {
       console.error('Worker error:', error);
@@ -235,6 +406,7 @@ export default {
   // Scheduled push notifications (run every minute via Cron Trigger)
   async scheduled(event, env, ctx) {
     try {
+      await ensureFamilySchema(env);
       const now = Date.now();
       const users = await env.DB.prepare('SELECT user_id, data FROM user_data').all();
 
@@ -277,6 +449,17 @@ export default {
           .bind(JSON.stringify(userData), now, user_id)
           .run();
       }
+
+      // Deliver due family reminders + any assigned items not yet pushed.
+      const pending = await env.DB.prepare("SELECT id, to_user, from_user, kind, payload FROM assigned_items WHERE notified = 0 AND status = 'pending' AND fire_at <= ?").bind(now).all();
+      for (const it of pending.results) {
+        const subRow = await env.DB.prepare('SELECT subscription FROM push_subscriptions WHERE user_id = ?').bind(it.to_user).first();
+        if (!subRow) {
+          await env.DB.prepare('UPDATE assigned_items SET notified = 1 WHERE id = ?').bind(it.id).run();
+          continue;
+        }
+        await pushAssignedItem(env, it);
+      }
     } catch (error) {
       console.error('Scheduled push error:', error);
     }
@@ -294,6 +477,53 @@ async function getUserFromAuth(request, env) {
   if (!session || session.expires < Date.now()) return null;
 
   return session.user_id;
+}
+
+// Helper: lazily create the family-feature tables (no manual migration needed).
+async function ensureFamilySchema(env) {
+  if (familySchemaReady) return;
+  await env.DB.batch([
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS family_members (family_id TEXT, user_id TEXT PRIMARY KEY, name TEXT, emoji TEXT, color TEXT, joined INTEGER)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS family_invites (code TEXT PRIMARY KEY, family_id TEXT, created INTEGER, expires INTEGER)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS family_data (family_id TEXT PRIMARY KEY, lists TEXT, updated INTEGER)'),
+    env.DB.prepare('CREATE TABLE IF NOT EXISTS assigned_items (id TEXT PRIMARY KEY, family_id TEXT, from_user TEXT, to_user TEXT, kind TEXT, payload TEXT, fire_at INTEGER, status TEXT, notified INTEGER, created INTEGER)'),
+  ]);
+  familySchemaReady = true;
+}
+
+// Helper: return the caller's family id, creating a solo family (with the
+// caller as its first member) if they don't belong to one yet.
+async function getOrCreateFamily(env, userId, name, emoji, color) {
+  const mem = await env.DB.prepare('SELECT family_id FROM family_members WHERE user_id = ?').bind(userId).first();
+  if (mem) return mem.family_id;
+  const familyId = crypto.randomUUID();
+  await env.DB.prepare('INSERT INTO family_members (family_id, user_id, name, emoji, color, joined) VALUES (?, ?, ?, ?, ?, ?)')
+    .bind(familyId, userId, name || 'Me', emoji || '😊', color || '#ffcd57', Date.now())
+    .run();
+  return familyId;
+}
+
+// Helper: push a single assigned item (task or reminder) to its recipient.
+async function pushAssignedItem(env, item) {
+  try {
+    const subRow = await env.DB.prepare('SELECT subscription FROM push_subscriptions WHERE user_id = ?').bind(item.to_user).first();
+    if (!subRow) return;
+    const sub = JSON.parse(subRow.subscription);
+    const payload = JSON.parse(item.payload || '{}');
+    const fromMem = await env.DB.prepare('SELECT name FROM family_members WHERE user_id = ?').bind(item.from_user).first();
+    const fromName = fromMem ? fromMem.name : 'Family';
+    const title = item.kind === 'reminder' ? '🔔 ' + (payload.title || 'Reminder') : '📋 ' + (payload.title || 'New task');
+    const body = item.kind === 'reminder' ? 'From ' + fromName : fromName + ' assigned you a task';
+    const status = await sendPushNotification(env, sub, { title, body, tag: item.id, requireInteraction: false });
+    if (status === 404 || status === 410) {
+      await env.DB.prepare('DELETE FROM push_subscriptions WHERE user_id = ?').bind(item.to_user).run();
+    }
+    if (status >= 200 && status < 500) {
+      await env.DB.prepare('UPDATE assigned_items SET notified = 1 WHERE id = ?').bind(item.id).run();
+    }
+  } catch (e) {
+    console.error('pushAssignedItem error:', e);
+  }
 }
 
 // Helper: create a new 30-day session for a user
