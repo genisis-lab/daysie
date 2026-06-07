@@ -94,7 +94,7 @@ let renagTimer = null;
 
 // App build version. Must match version.json on the server. Bump both on every
 // deploy so open tabs can detect a new release and show the refresh banner.
-const APP_VERSION = '2026.06.07-6';
+const APP_VERSION = '2026.06.07-7';
 let swRegistration = null;
 let updateBannerShown = false;
 
@@ -437,9 +437,9 @@ function openTask(task = null) {
   $('#taskDate').value = day(due);
   $('#taskTime').value = due.toTimeString().slice(0, 5);
 
-  $('#priorityPicker button').forEach((b) => b.classList.toggle('on', b.dataset.priority === priority));
-  $('#repeatPicker button').forEach((b) => b.classList.toggle('on', b.dataset.repeat === repeat));
-  $('#categoryPicker button').forEach((b) => b.classList.toggle('on', b.dataset.category === category));
+  $$('#priorityPicker button').forEach((b) => b.classList.toggle('on', b.dataset.priority === priority));
+  $$('#repeatPicker button').forEach((b) => b.classList.toggle('on', b.dataset.repeat === repeat));
+  $$('#categoryPicker button').forEach((b) => b.classList.toggle('on', b.dataset.category === category));
 
   // Repeat-until end date
   const ru = $('#taskRepeatUntil');
