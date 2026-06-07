@@ -1,0 +1,18 @@
+# Cloudflare Worker configuration for Daysie
+name = "daysie-api"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "daysie-db"
+database_id = "YOUR_D1_DATABASE_ID" # Replace after creating: wrangler d1 create daysie-db
+
+# Cron trigger for scheduled push notifications (runs every minute)
+[triggers]
+crons = ["* * * * *"]
+
+# Environment variables (add via wrangler secret put)
+# VAPID_PUBLIC_KEY - Generate with: npx web-push generate-vapid-keys
+# VAPID_PRIVATE_KEY
