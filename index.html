@@ -167,7 +167,10 @@
   <!-- TASK DIALOG -->
   <dialog id="taskDialog">
     <div class="modal" id="taskForm">
-      <h2 id="dialogTitle">⏰ New reminder</h2>
+      <div class="modal-head">
+        <h2 id="dialogTitle">⏰ New reminder</h2>
+        <button type="button" id="closeTaskTop" class="modal-close" title="Close" aria-label="Close">✕</button>
+      </div>
       <label>What do you need to do?
         <input id="taskTitle" required maxlength="120" placeholder="e.g. Take medicine, Call Grandma" />
       </label>
