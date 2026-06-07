@@ -1214,6 +1214,56 @@ body[data-theme="dark"] .modal-close {
   margin-top: 16px;
 }
 
+/* UPDATE BANNER (new app version available) */
+#updateBanner {
+  position: fixed;
+  z-index: 200;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 78px);
+  transform: translateX(-50%);
+  width: min(94%, 460px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #7fc989, #79c8ce);
+  color: #08312a;
+  box-shadow: var(--shadow);
+  font-weight: 800;
+  animation: bannerPop 0.35s ease;
+}
+#updateBanner.hidden { display: none; }
+#updateBanner .ub-emoji { font-size: 22px; }
+#updateBanner .ub-text { flex: 1; line-height: 1.2; }
+#updateBanner .ub-text small {
+  display: block;
+  font-weight: 600;
+  opacity: 0.85;
+  font-size: 0.78rem;
+}
+#updateBanner button {
+  border: none;
+  border-radius: 12px;
+  padding: 9px 14px;
+  font-weight: 800;
+  cursor: pointer;
+  background: #fff;
+  color: #0a6b54;
+  white-space: nowrap;
+}
+#updateBanner .ub-dismiss {
+  background: transparent;
+  color: #08312a;
+  padding: 6px 8px;
+  font-size: 18px;
+  line-height: 1;
+}
+@keyframes bannerPop {
+  from { opacity: 0; transform: translateX(-50%) translateY(12px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
 /* TOASTS */
 #toastHost {
   position: fixed;
