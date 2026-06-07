@@ -1,9 +1,14 @@
 -- Daysie Database Schema for Cloudflare D1
--- Run this after creating your D1 database: wrangler d1 execute DB --file=schema.sql
+-- Apply: npx wrangler d1 execute daysie-db --remote --file=schema.sql
+--
+-- Daysie uses DEVICE PAIRING (no email). If you previously created the old
+-- email-based tables, reset the changed/removed ones ONCE before applying:
+--   npx wrangler d1 execute daysie-db --remote --command "DROP TABLE IF EXISTS users; DROP TABLE IF EXISTS sessions; DROP TABLE IF EXISTS auth_codes; DROP TABLE IF EXISTS pair_codes; DROP TABLE IF EXISTS rate_limits;"
+-- (This is safe early on since there is no real account data yet.)
 
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
-  email TEXT UNIQUE NOT NULL,
+  email TEXT,
   created_at INTEGER NOT NULL
 );
 
@@ -14,10 +19,25 @@ CREATE TABLE IF NOT EXISTS sessions (
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
-CREATE TABLE IF NOT EXISTS auth_codes (
-  email TEXT PRIMARY KEY,
-  code TEXT NOT NULL,
-  expires INTEGER NOT NULL
+-- Short-lived device pairing codes with approve-on-source-device handshake.
+-- redeemed: a new device has entered the code and is waiting.
+-- approved: the source device approved; session_token is then handed out.
+CREATE TABLE IF NOT EXISTS pair_codes (
+  code TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  expires INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  redeemed INTEGER NOT NULL DEFAULT 0,
+  approved INTEGER NOT NULL DEFAULT 0,
+  session_token TEXT,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- Simple per-IP rate limiting (used by the pairing redeem endpoint).
+CREATE TABLE IF NOT EXISTS rate_limits (
+  k TEXT PRIMARY KEY,
+  count INTEGER NOT NULL,
+  reset INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS user_data (
@@ -35,4 +55,5 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires);
-CREATE INDEX IF NOT EXISTS idx_auth_codes_expires ON auth_codes(expires);
+CREATE INDEX IF NOT EXISTS idx_pair_codes_user ON pair_codes(user_id);
+CREATE INDEX IF NOT EXISTS idx_pair_codes_expires ON pair_codes(expires);
