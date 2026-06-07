@@ -1563,3 +1563,50 @@ body[data-theme="dark"] .photo-label { color: var(--soft); }
 body[data-theme="dark"] .meta .late { background: #4a2230; color: #ff9bb0; }
 body[data-theme="dark"] .toast { border-left-color: var(--sun); }
 body[data-theme="dark"] .cal-day.today { background: linear-gradient(135deg, #3a3420, #3a2c20); }
+
+/* ---- v-10 features: quick add, habits, shared lists, assignee, tour ---- */
+.quick-add { display: flex; gap: 8px; margin: 8px 0 14px; }
+.quick-add input { flex: 1; min-width: 0; }
+
+.assignee-badge { background: var(--lav, #ad97e8); color: #fff; padding: 2px 8px; border-radius: 20px; font-weight: 700; }
+
+.habits-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.habit-pill { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 20px; border: 2px solid var(--line, #efe3d7); background: var(--card, #fff); font-weight: 700; color: var(--ink, #2a2535); cursor: pointer; transition: .15s; }
+.habit-pill .habit-emoji { font-size: 1.1rem; }
+.habit-pill .habit-streak { font-size: .82rem; color: var(--soft, #716c80); }
+.habit-pill.on { border-color: var(--hc, #ffcd57); background: color-mix(in srgb, var(--hc, #ffcd57) 18%, var(--card, #fff)); }
+.habit-pill.on .habit-streak { color: var(--hc, #f3ad32); }
+.habit-empty { color: var(--soft, #716c80); font-weight: 700; padding: 6px 2px; }
+.habit-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 0; }
+.habit-row-name { font-weight: 700; }
+.habit-dots { display: flex; gap: 4px; }
+.habit-dots i { width: 14px; height: 14px; border-radius: 50%; background: var(--line, #efe3d7); display: inline-block; }
+.habit-dots i.on { background: var(--hc, #7fc989); }
+
+.lists-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 8px; }
+.list-card { background: var(--card, #fff); border: 1px solid var(--line, #efe3d7); border-radius: 16px; padding: 12px 14px; }
+.list-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.list-head small { color: var(--soft, #716c80); font-weight: 700; }
+.list-items { display: flex; flex-direction: column; gap: 4px; }
+.list-item { display: flex; align-items: center; gap: 8px; background: none; border: none; text-align: left; padding: 6px 4px; cursor: pointer; font-weight: 600; color: var(--ink, #2a2535); border-radius: 8px; width: 100%; }
+.list-item .subcheck { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line, #efe3d7); display: inline-flex; align-items: center; justify-content: center; flex: none; font-size: .8rem; }
+.list-item.done { color: var(--soft, #716c80); text-decoration: line-through; }
+.list-item.done .subcheck { background: var(--green, #7fc989); border-color: var(--green, #7fc989); color: #fff; }
+.list-add-row { display: flex; gap: 6px; margin-top: 8px; }
+.list-add-input { flex: 1; min-width: 0; }
+
+.manage-list { display: flex; flex-direction: column; gap: 6px; }
+.manage-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; background: var(--bg, #fff7ed); border-radius: 10px; font-weight: 700; }
+
+.tour-overlay { position: fixed; inset: 0; z-index: 200; display: flex; align-items: center; justify-content: center; background: rgba(20,16,30,.55); backdrop-filter: blur(4px); padding: 20px; }
+.tour-overlay.hidden { display: none; }
+.tour-card { background: var(--card, #fff); border-radius: 24px; padding: 28px 24px; max-width: 360px; width: 100%; text-align: center; position: relative; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
+.tour-skip { position: absolute; top: 14px; right: 16px; background: none; border: none; color: var(--soft, #716c80); font-weight: 700; cursor: pointer; }
+.tour-icon { font-size: 54px; margin-bottom: 6px; }
+.tour-card h2 { margin: 4px 0 10px; }
+.tour-card p { color: var(--soft, #716c80); font-weight: 600; line-height: 1.5; min-height: 72px; }
+.tour-dots { display: flex; gap: 6px; justify-content: center; margin: 14px 0 18px; }
+.tour-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--line, #efe3d7); }
+.tour-dots i.on { background: var(--sun2, #f3ad32); width: 22px; border-radius: 5px; }
+.tour-actions { display: flex; gap: 10px; }
+.tour-actions button { flex: 1; }
