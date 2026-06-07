@@ -61,9 +61,11 @@ const profileEmojis = ['🌼', '👵', '👴', '👨', '👩', '👧', '👦', '
 // State
 let db = {
   profiles: [
-    { id: 'default', name: 'Me', emoji: '🌼', color: 'sun', tasks: [], entries: [], streak: 0, lastCheck: '', prompt: 0 },
+    { id: 'default', name: 'Me', emoji: '🌼', color: 'sun', tasks: [], entries: [], streak: 0, lastCheck: '', prompt: 0, habits: [] },
   ],
   onboarded: false,
+  lists: [],
+  tourDone: false,
 };
 
 let settings = {
@@ -91,10 +93,11 @@ let timer = null;
 let calendarDate = new Date();
 let taskFilter = 'all';
 let renagTimer = null;
+let assignee = null;
 
 // App build version. Must match version.json on the server. Bump both on every
 // deploy so open tabs can detect a new release and show the refresh banner.
-const APP_VERSION = '2026.06.07-9';
+const APP_VERSION = '2026.06.07-10';
 let swRegistration = null;
 let updateBannerShown = false;
 
@@ -134,9 +137,25 @@ const load = () => {
     const p = localStorage.getItem(PROFILE_KEY);
     if (p && db.profiles.find((pr) => pr.id === p)) activeProfileId = p;
   } catch (e) {}
+
+  // Ensure newer data structures exist on older saved data.
+  if (!Array.isArray(db.lists)) db.lists = [];
+  if (typeof db.tourDone !== 'boolean') db.tourDone = false;
+  (db.profiles || []).forEach((pr) => { if (!Array.isArray(pr.habits)) pr.habits = []; });
 };
 
 const getProfile = () => db.profiles.find((p) => p.id === activeProfileId) || db.profiles[0];
+
+// Find a task by id across ALL family profiles (used by the "Everyone" view and
+// assigned tasks, so actions work no matter which profile owns the task).
+const findTaskOwner = (taskId) => {
+  for (const p of db.profiles) {
+    const t = (p.tasks || []).find((x) => x.id === taskId);
+    if (t) return { task: t, profile: p };
+  }
+  return null;
+};
+const profileById = (pid) => db.profiles.find((p) => p.id === pid) || null;
 
 const id = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const day = (d) => (d || new Date()).toISOString().slice(0, 10);
@@ -292,6 +311,7 @@ $('#startBtn').onclick = () => {
   db.onboarded = true;
   save();
   showApp();
+  if (!db.tourDone) setTimeout(startTour, 400);
 };
 
 function go(tab) {
@@ -425,6 +445,18 @@ function bumpStreak() {
 }
 
 // TASKS
+function buildAssigneePicker() {
+  const host = $('#assigneePicker');
+  if (!host) return;
+  const opts = [{ id: '', emoji: '🙂', name: 'Anyone' }].concat(db.profiles.map((p) => ({ id: p.id, emoji: p.emoji, name: p.name })));
+  host.innerHTML = opts.map((o) => `<button type="button" class="chip ${(assignee || '') === o.id ? 'on' : ''}" data-assignee="${o.id}">${o.emoji} ${esc(o.name)}</button>`).join('');
+  $$('#assigneePicker button').forEach((b) => (b.onclick = () => {
+    assignee = b.dataset.assignee || null;
+    $$('#assigneePicker button').forEach((x) => x.classList.remove('on'));
+    b.classList.add('on');
+  }));
+}
+
 function openTask(task = null) {
   editing = task?.id || null;
   $('#dialogTitle').textContent = task ? '✏️ Edit reminder' : '⏰ New reminder';
@@ -433,6 +465,8 @@ function openTask(task = null) {
   priority = task?.priority || 'low';
   repeat = task?.repeat || 'none';
   category = task?.category || 'none';
+  assignee = task?.assignee || null;
+  buildAssigneePicker();
 
   // Default to today at a reasonable hour
   const due = task?.due ? new Date(task.due) : new Date();
@@ -503,13 +537,11 @@ $('#saveTaskBtn').onclick = () => {
 
   const prof = getProfile();
   const repeatUntil = repeat !== 'none' ? ($('#taskRepeatUntil').value || null) : null;
-  const data = { title, due, note: $('#taskNote').value.trim(), priority, repeat, repeatUntil, category, subtasks: editingSubtasks.map((s) => ({ ...s })), notified: false };
+  const data = { title, due, note: $('#taskNote').value.trim(), priority, repeat, repeatUntil, category, assignee, subtasks: editingSubtasks.map((s) => ({ ...s })), notified: false };
 
   if (editing) {
-    Object.assign(
-      prof.tasks.find((t) => t.id === editing),
-      data
-    );
+    const owner = findTaskOwner(editing);
+    if (owner) Object.assign(owner.task, data);
   } else {
     prof.tasks.push({ id: id(), done: false, created: Date.now(), ...data });
   }
@@ -537,7 +569,8 @@ function completeTask(t) {
     t.completed = Date.now();
     bumpStreak();
     confetti();
-    const prof = getProfile();
+    const owner = findTaskOwner(t.id);
+    const prof = owner ? owner.profile : getProfile();
     if (t.repeat && t.repeat !== 'none' && t.due) {
       const nd = nextDue(t.due, t.repeat);
       const until = t.repeatUntil ? new Date(t.repeatUntil + 'T23:59:59').getTime() : null;
@@ -556,7 +589,8 @@ function delTask(idv) {
     'Delete reminder?',
     'This cannot be undone.',
     () => {
-      const prof = getProfile();
+      const owner = findTaskOwner(idv);
+      const prof = owner ? owner.profile : getProfile();
       prof.tasks = prof.tasks.filter((t) => t.id !== idv);
       save();
       renderAll();
@@ -593,14 +627,14 @@ function openSnooze(t) {
 }
 
 $$('#snoozeDialog [data-snooze-min]').forEach((b) => (b.onclick = () => {
-  const prof = getProfile();
-  const t = prof.tasks.find((x) => x.id === snoozeTaskId);
+  const o = findTaskOwner(snoozeTaskId);
+  const t = o ? o.task : null;
   $('#snoozeDialog').close();
   if (t) snooze(t, +b.dataset.snoozeMin);
 }));
 $('#snoozeDialog [data-snooze-tomorrow]')?.addEventListener('click', () => {
-  const prof = getProfile();
-  const t = prof.tasks.find((x) => x.id === snoozeTaskId);
+  const o = findTaskOwner(snoozeTaskId);
+  const t = o ? o.task : null;
   $('#snoozeDialog').close();
   if (t) snoozeUntilTomorrow(t);
 });
@@ -617,6 +651,13 @@ function fmt(ms) {
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + tm;
 }
 
+function assigneeBadge(t) {
+  if (!t.assignee) return '';
+  const p = profileById(t.assignee);
+  if (!p) return '';
+  return `<span class="assignee-badge">${p.emoji} ${esc(p.name)}</span>`;
+}
+
 function taskHTML(t) {
   const late = t.due && !t.done && t.due < Date.now();
   const cat = categories.find((c) => c.id === t.category) || categories[0];
@@ -628,6 +669,7 @@ function taskHTML(t) {
         ${t.due ? `<span class="${late ? 'late' : ''}">${late ? '⚠️ ' : '🕒 '}${fmt(t.due)}</span>` : ''}
         ${t.repeat && t.repeat !== 'none' ? `<span>🔁 ${t.repeat}${t.repeatUntil ? ' · until ' + new Date(t.repeatUntil + 'T00:00:00').toLocaleDateString([], { month: 'short', day: 'numeric' }) : ''}</span>` : ''}
         ${t.priority === 'high' ? '<span>🌸 Important</span>' : ''}
+        ${assigneeBadge(t)}
         ${t.subtasks && t.subtasks.length ? `<span>☑️ ${t.subtasks.filter((s) => s.done).length}/${t.subtasks.length}</span>` : ''}
       </div>
       ${t.note ? `<div class="note">${esc(t.note)}</div>` : ''}
@@ -643,8 +685,9 @@ function taskHTML(t) {
 
 function renderTasks() {
   const prof = getProfile();
-  let active = prof.tasks.filter((t) => !t.done);
-  const done = prof.tasks
+  const source = taskFilter === 'everyone' ? db.profiles.flatMap((p) => p.tasks || []) : prof.tasks;
+  let active = source.filter((t) => !t.done);
+  const done = source
     .filter((t) => t.done)
     .sort((a, b) => (b.completed || 0) - (a.completed || 0))
     .slice(0, 10);
@@ -680,21 +723,24 @@ function renderTasks() {
 
   $('#taskList').innerHTML = html || empty('🌼', 'No reminders yet', 'Tap + to add one.');
 
-  // Today view
-  const today = groups[1][1].concat(groups[0][1]).sort((a, b) => (a.due || 0) - (b.due || 0));
+  // Today view (always the current profile, independent of the Tasks filter)
+  const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
+  const today = prof.tasks
+    .filter((t) => !t.done && t.due && t.due <= todayEnd.getTime())
+    .sort((a, b) => (a.due || 0) - (b.due || 0));
   $('#todayTasks').innerHTML = today.length ? today.map(taskHTML).join('') : empty('✨', 'Nothing due today', 'Enjoy your day, or add something new.');
 
   bindTaskButtons();
 }
 
 function bindTaskButtons() {
-  const prof = getProfile();
-  $$('[data-done]').forEach((b) => (b.onclick = () => completeTask(prof.tasks.find((t) => t.id === b.dataset.done))));
+  const findT = (taskId) => { const o = findTaskOwner(taskId); return o ? o.task : null; };
+  $$('[data-done]').forEach((b) => (b.onclick = () => { const t = findT(b.dataset.done); if (t) completeTask(t); }));
   $$('[data-delete]').forEach((b) => (b.onclick = () => delTask(b.dataset.delete)));
-  $$('[data-edit]').forEach((b) => (b.onclick = () => openTask(prof.tasks.find((t) => t.id === b.dataset.edit))));
-  $$('[data-snooze]').forEach((b) => (b.onclick = () => openSnooze(prof.tasks.find((t) => t.id === b.dataset.snooze))));
+  $$('[data-edit]').forEach((b) => (b.onclick = () => { const t = findT(b.dataset.edit); if (t) openTask(t); }));
+  $$('[data-snooze]').forEach((b) => (b.onclick = () => { const t = findT(b.dataset.snooze); if (t) openSnooze(t); }));
   $$('[data-subtask]').forEach((b) => (b.onclick = () => {
-    const t = prof.tasks.find((x) => x.id === b.dataset.parent);
+    const t = findT(b.dataset.parent);
     const s = t && t.subtasks ? t.subtasks.find((x) => x.id === b.dataset.subtask) : null;
     if (!s) return;
     s.done = !s.done;
@@ -867,18 +913,23 @@ function renderPhotoPreview() {
   $('#photoPreview').innerHTML = selectedPhotos.map((p, i) => `<img src="${p}" alt="Photo ${i + 1}" />`).join('');
 }
 
-$('#saveEntry').onclick = () => {
+$('#saveEntry').onclick = async () => {
   const text = $('#journalText').value.trim();
   if (!text && !selectedMood && selectedPhotos.length === 0) return toast('📝 Add a little something', 'Pick a mood, write, or add a photo.');
 
   const prof = getProfile();
+  let photos = [...selectedPhotos];
+  if (settings.authToken && photos.some((ph) => String(ph).startsWith('data:'))) {
+    toast('☁️ Saving photos…', 'Uploading to your cloud.');
+    photos = await uploadPhotosToR2(photos);
+  }
   prof.entries.unshift({
     id: id(),
     text,
     mood: selectedMood,
     tags: [...new Set(selectedTags)],
     prompt: prompts[prof.prompt],
-    photos: [...selectedPhotos],
+    photos,
     ts: Date.now(),
   });
   bumpStreak();
@@ -1082,13 +1133,18 @@ function renderEditPhotos() {
   }));
 }
 
-$('#saveEditEntry').onclick = () => {
+$('#saveEditEntry').onclick = async () => {
   const prof = getProfile();
   const e = prof.entries.find((x) => x.id === editingEntry);
   if (!e) return;
   e.text = $('#editEntryText').value.trim();
   e.mood = selectedMood;
-  e.photos = [...editingPhotos];
+  let photos = [...editingPhotos];
+  if (settings.authToken && photos.some((ph) => String(ph).startsWith('data:'))) {
+    toast('☁️ Saving photos…', 'Uploading to your cloud.');
+    photos = await uploadPhotosToR2(photos);
+  }
+  e.photos = photos;
   save();
   $('#editEntryDialog').close();
   renderEntries();
@@ -1162,6 +1218,8 @@ function renderInsights() {
   ];
 
   $('#badges').innerHTML = badges.map((b) => `<div class="badge ${b[3] ? '' : 'locked'}"><b>${b[0]}</b><div><strong>${b[1]}</strong><br><small>${b[2]}</small></div></div>`).join('');
+
+  renderHabitInsights();
 }
 
 function renderAll() {
@@ -1170,6 +1228,8 @@ function renderAll() {
   renderInsights();
   renderWeekAgenda();
   renderOnThisDay();
+  renderHabits();
+  renderLists();
 
   const prof = getProfile();
   $('#streakNum').textContent = prof.streak;
@@ -1377,6 +1437,7 @@ $('#addProfileBtn').onclick = () => {
     streak: 0,
     lastCheck: '',
     prompt: 0,
+    habits: [],
   });
   save();
   $('#newProfileName').value = '';
@@ -1595,28 +1656,70 @@ $('#settingsDialog')?.addEventListener('close', () => { stopPairPolling(); stopS
 // photos to the cloud. They stay on the device that created them; tasks and
 // journal text still sync across devices.
 function stripPhotosForSync(profiles) {
+  // R2-hosted photos are tiny URL strings and sync fine. Only base64 data-URLs
+  // (which blow past D1's size limit) are stripped before syncing.
   return (profiles || []).map((p) => ({
     ...p,
-    entries: (p.entries || []).map((e) => (e.photos && e.photos.length ? { ...e, photos: [] } : e)),
+    entries: (p.entries || []).map((e) => {
+      if (!e.photos || !e.photos.length) return e;
+      const kept = e.photos.filter((u) => !String(u).startsWith('data:'));
+      return kept.length === e.photos.length ? e : { ...e, photos: kept };
+    }),
   }));
 }
 
 // Restore device-local photos onto pulled (photo-less) profiles so a sync
 // never wipes the photos held on this device.
 function mergeLocalPhotos(remoteProfiles) {
-  const localPhotos = {};
+  // Remote entries carry R2 photo URLs (synced). Any device-local base64 photos
+  // were stripped before upload, so restore them here alongside the R2 URLs.
+  const localData = {};
   (db.profiles || []).forEach((p) => {
     const em = {};
-    (p.entries || []).forEach((e) => { if (e.photos && e.photos.length) em[e.id] = e.photos; });
-    localPhotos[p.id] = em;
+    (p.entries || []).forEach((e) => {
+      const d = (e.photos || []).filter((u) => String(u).startsWith('data:'));
+      if (d.length) em[e.id] = d;
+    });
+    localData[p.id] = em;
   });
   (remoteProfiles || []).forEach((p) => {
-    const em = localPhotos[p.id] || {};
+    const em = localData[p.id] || {};
     (p.entries || []).forEach((e) => {
-      if ((!e.photos || !e.photos.length) && em[e.id]) e.photos = em[e.id];
+      const remote = (e.photos || []).filter((u) => !String(u).startsWith('data:'));
+      const localD = em[e.id] || [];
+      if (localD.length) e.photos = [...remote, ...localD];
     });
   });
   return remoteProfiles;
+}
+
+// Upload any base64 photos to R2 object storage and return an array where each
+// uploaded photo is replaced by its small R2 URL. Photos that fail to upload
+// (or when sync is off) are kept as their original data-URL so nothing is lost.
+async function uploadPhotosToR2(photos) {
+  if (!photos || !photos.length) return photos || [];
+  if (!settings.authToken) return photos;
+  const out = [];
+  for (const ph of photos) {
+    if (!String(ph).startsWith('data:')) { out.push(ph); continue; }
+    try {
+      const blob = await (await fetch(ph)).blob();
+      const res = await fetch(`${API}/photo`, {
+        method: 'POST',
+        headers: { 'Content-Type': blob.type || 'image/jpeg', Authorization: `Bearer ${settings.authToken}` },
+        body: blob,
+      });
+      if (res.ok) {
+        const d = await res.json();
+        out.push(`${API}/photo/${d.key}`);
+      } else {
+        out.push(ph);
+      }
+    } catch (e) {
+      out.push(ph);
+    }
+  }
+  return out;
 }
 
 async function syncToCloud() {
@@ -1625,7 +1728,7 @@ async function syncToCloud() {
     await fetch('https://daysie-api.neil27.workers.dev/data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.authToken}` },
-      body: JSON.stringify({ profiles: stripPhotosForSync(db.profiles) }),
+      body: JSON.stringify({ profiles: stripPhotosForSync(db.profiles), lists: db.lists || [], tourDone: !!db.tourDone }),
     });
   } catch (e) {
     console.error('Sync error:', e);
@@ -1640,9 +1743,15 @@ async function pullFromCloud() {
     });
     if (res.ok) {
       const data = await res.json();
+      if (data.lists) db.lists = data.lists;
+      if (typeof data.tourDone === 'boolean') db.tourDone = db.tourDone || data.tourDone;
       if (data.profiles && data.profiles.length > 0) {
         // Last-write-wins for tasks/text, but keep this device's local photos.
         db.profiles = mergeLocalPhotos(data.profiles);
+        (db.profiles || []).forEach((pr) => { if (!Array.isArray(pr.habits)) pr.habits = []; });
+        save();
+        renderAll();
+      } else if (data.lists) {
         save();
         renderAll();
       }
@@ -1845,5 +1954,153 @@ function three() {
   })();
 }
 
-setTimeout(three, 500);
-boot();
+// ============================================================================
+// Natural-language quick add
+// ============================================================================
+const WEEKDAYS = { sunday: 0, sun: 0, monday: 1, mon: 1, tuesday: 2, tue: 2, tues: 2, wednesday: 3, wed: 3, thursday: 4, thu: 4, thurs: 4, friday: 5, fri: 5, saturday: 6, sat: 6 };
+
+function parseQuickAdd(raw) {
+  const original = (raw || '').trim();
+  const lower = original.toLowerCase();
+  let priority = 'low';
+  let repeat = 'none';
+  let category = 'none';
+  const date = new Date();
+  let hasDay = false;
+  let hasTime = false;
+  const strip = [];
+
+  let m = lower.match(/\b(important|urgent|high priority|asap)\b/);
+  if (m) { priority = 'high'; strip.push(m[0]); }
+
+  if (/\bevery day\b|\bdaily\b/.test(lower)) { repeat = 'daily'; strip.push('every day', 'daily'); }
+  else if (/\bevery week\b|\bweekly\b/.test(lower)) { repeat = 'weekly'; strip.push('every week', 'weekly'); }
+  else if (/\bevery month\b|\bmonthly\b/.test(lower)) { repeat = 'monthly'; strip.push('every month', 'monthly'); }
+  else if (/\bevery year\b|\byearly\b|\bannually\b/.test(lower)) { repeat = 'yearly'; strip.push('every year', 'yearly', 'annually'); }
+
+  const catRules = [
+    ['meds', /\b(meds?|medicine|medication|pill|pills)\b/],
+    ['birthday', /\bbirthday\b/],
+    ['call', /\bcall\b/],
+    ['appointment', /\b(appointment|appt|doctor|dentist)\b/],
+    ['chores', /\b(chore|chores|clean|laundry|dishes|trash|vacuum)\b/],
+  ];
+  for (const [cid, re] of catRules) { if (re.test(lower)) { category = cid; break; } }
+
+  m = lower.match(/\bin (\d+) (day|days|week|weeks)\b/);
+  if (m) {
+    const n = parseInt(m[1], 10);
+    date.setDate(date.getDate() + (m[2].indexOf('week') === 0 ? n * 7 : n));
+    hasDay = true; strip.push(m[0]);
+  }
+
+  if (/\btomorrow\b/.test(lower)) { date.setDate(date.getDate() + 1); hasDay = true; strip.push('tomorrow'); }
+  else if (/\btonight\b/.test(lower)) { hasDay = true; strip.push('tonight'); date.setHours(20, 0, 0, 0); hasTime = true; }
+  else if (/\btoday\b/.test(lower)) { hasDay = true; strip.push('today'); }
+
+  if (!hasDay) {
+    for (const wd of Object.keys(WEEKDAYS)) {
+      const re = new RegExp('\\b(next |on )?' + wd + '\\b');
+      const mm = lower.match(re);
+      if (mm) {
+        let diff = (WEEKDAYS[wd] - date.getDay() + 7) % 7;
+        if (diff === 0) diff = 7;
+        date.setDate(date.getDate() + diff);
+        hasDay = true; strip.push(mm[0]);
+        break;
+      }
+    }
+  }
+
+  m = lower.match(/\b(at )?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/);
+  if (m) {
+    let h = parseInt(m[2], 10) % 12;
+    if (m[4] === 'pm') h += 12;
+    date.setHours(h, m[3] ? parseInt(m[3], 10) : 0, 0, 0);
+    hasTime = true; strip.push(m[0]);
+  } else {
+    m = lower.match(/\bat (\d{1,2}):(\d{2})\b/);
+    if (m) { date.setHours(parseInt(m[1], 10), parseInt(m[2], 10), 0, 0); hasTime = true; strip.push(m[0]); }
+    else if (/\bnoon\b/.test(lower)) { date.setHours(12, 0, 0, 0); hasTime = true; strip.push('noon'); }
+    else if (/\bmidnight\b/.test(lower)) { date.setHours(0, 0, 0, 0); hasTime = true; strip.push('midnight'); }
+    else if (/\bmorning\b/.test(lower)) { date.setHours(9, 0, 0, 0); hasTime = true; hasDay = true; strip.push('this morning', 'morning'); }
+    else if (/\bafternoon\b/.test(lower)) { date.setHours(14, 0, 0, 0); hasTime = true; hasDay = true; strip.push('this afternoon', 'afternoon'); }
+    else if (/\bevening\b/.test(lower)) { date.setHours(18, 0, 0, 0); hasTime = true; hasDay = true; strip.push('this evening', 'evening'); }
+  }
+
+  if (hasDay && !hasTime) { date.setHours(9, 0, 0, 0); }
+
+  let title = original;
+  strip.sort((a, b) => b.length - a.length).forEach((tok) => {
+    if (!tok) return;
+    title = title.replace(new RegExp(tok.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), ' ');
+  });
+  title = title.replace(/\b(at|on|in|every|this)\b/gi, ' ').replace(/\s+/g, ' ').trim();
+  title = title.replace(/^[-,:\s]+|[-,:\s]+$/g, '').trim();
+  if (!title) title = original;
+  title = title.charAt(0).toUpperCase() + title.slice(1);
+
+  const due = (hasDay || hasTime) ? date.getTime() : null;
+  return { title, due, priority, repeat, category };
+}
+
+function quickAdd(raw) {
+  const text = (raw || '').trim();
+  if (!text) return;
+  const parsed = parseQuickAdd(text);
+  const prof = getProfile();
+  prof.tasks.push({ id: id(), done: false, created: Date.now(), title: parsed.title, due: parsed.due, note: '', priority: parsed.priority, repeat: parsed.repeat, repeatUntil: null, category: parsed.category, assignee: null, subtasks: [], notified: false });
+  save();
+  renderAll();
+  confetti();
+  toast('\u2705 ' + parsed.title, parsed.due ? '📅 ' + fmt(parsed.due) : 'Added to your list.');
+}
+
+function bindQuickAdd(inputSel, btnSel) {
+  const inp = $(inputSel);
+  const btn = $(btnSel);
+  if (!inp) return;
+  const run = () => { if (inp.value.trim()) { quickAdd(inp.value); inp.value = ''; } };
+  if (btn) btn.onclick = run;
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run(); } });
+}
+bindQuickAdd('#quickAddToday', '#quickAddTodayBtn');
+bindQuickAdd('#quickAddTasks', '#quickAddTasksBtn');
+
+// ============================================================================
+// Habit tracker (per profile)
+// ============================================================================
+const habitColors = ['#ffcd57', '#ff8c9a', '#7fc989', '#79c8ce', '#ad97e8', '#ff9f5a'];
+const habitEmojis = ['\u2705', '💧', '🏃', '🧘', '📚', '💊', '🪥', '🥗', '😴', '🌳', '🎯', '🙏'];
+let newHabitColor = habitColors[0];
+let newHabitEmoji = habitEmojis[0];
+
+function habitStreak(h) {
+  const hist = h.history || {};
+  let streak = 0;
+  const d = new Date();
+  if (!hist[day(d)]) d.setDate(d.getDate() - 1);
+  while (hist[day(d)]) { streak++; d.setDate(d.getDate() - 1); }
+  return streak;
+}
+
+function renderHabits() {
+  const host = $('#habitsList');
+  if (!host) return;
+  const prof = getProfile();
+  const habits = prof.habits || [];
+  const today = day();
+  if (!habits.length) {
+    host.innerHTML = '<div class="habit-empty">No habits yet. Tap \u201cManage\u201d to add one. 🌱</div>';
+    return;
+  }
+  host.innerHTML = habits.map((h) => {
+    const on = !!(h.history && h.history[today]);
+    const st = habitStreak(h);
+    return `<button type="button" class="habit-pill ${on ? 'on' : ''}" data-habit="${h.id}" style="--hc:${h.color || '#ffcd57'}">
+      <span class="habit-emoji">${h.emoji || '\u2705'}</span>
+      <span class="habit-name">${esc(h.name)}</span>
+      <span class="habit-streak">${st > 0 ? '🔥 ' + st : (on ? '\u2713' : '')}</span>
+    </button>`;
+  }).join('');
+  $$('#habitsList [data-habit]').forEach((b) => (b.onclick = () => to
