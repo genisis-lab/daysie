@@ -90,7 +90,7 @@ let renagTimer = null;
 
 // App build version. Must match version.json on the server. Bump both on every
 // deploy so open tabs can detect a new release and show the refresh banner.
-const APP_VERSION = '2026.06.07-3';
+const APP_VERSION = '2026.06.07-4';
 let swRegistration = null;
 let updateBannerShown = false;
 
@@ -467,6 +467,7 @@ $('#saveTaskBtn').onclick = () => {
 };
 
 $('#cancelTaskBtn').onclick = () => $('#taskDialog').close();
+$('#closeTaskTop').onclick = () => $('#taskDialog').close();
 
 function nextDue(ms, rep) {
   const d = new Date(ms);
