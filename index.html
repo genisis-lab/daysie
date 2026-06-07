@@ -235,7 +235,10 @@
   <!-- SETTINGS MODAL -->
   <dialog id="settingsDialog">
     <div class="modal">
-      <h2>⚙️ Settings</h2>
+      <div class="modal-head">
+        <h2>⚙️ Settings</h2>
+        <button type="button" id="closeSettingsTop" class="modal-close" title="Close" aria-label="Close">✕</button>
+      </div>
 
       <p class="label">Theme</p>
       <div class="chips" id="themePicker">
@@ -285,7 +288,6 @@
 
       <p class="label">Push notifications (real, even when closed)</p>
       <div id="pushSection">
-        <p style="color:var(--soft);font-size:.88rem">After signing in and deploying the Cloudflare Worker, Daysie can push reminders to your device even when the app is closed.</p>
         <button type="button" id="subscribePushBtn" class="soft wide">🔔 Enable push notifications</button>
       </div>
 

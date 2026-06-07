@@ -1165,6 +1165,44 @@ dialog::backdrop {
   overflow-y: auto;
 }
 
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  position: sticky;
+  top: -20px;
+  margin: -20px -20px 12px;
+  padding: 18px 20px 12px;
+  background: var(--card);
+  border-bottom: 1.5px solid var(--line);
+  border-radius: 26px 26px 0 0;
+  z-index: 3;
+}
+
+.modal-head h2 {
+  margin: 0;
+}
+
+.modal-close {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff1e6;
+  color: var(--soft);
+  font-size: 18px;
+  font-weight: 900;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+body[data-theme="dark"] .modal-close {
+  background: var(--bg2);
+}
+
 .modal label {
   display: block;
   margin: 10px 0;
