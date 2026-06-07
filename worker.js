@@ -216,13 +216,19 @@ export default {
 
               if (subRow) {
                 const subscription = JSON.parse(subRow.subscription);
-                await sendPushNotification(subscription, {
+                const status = await sendPushNotification(env, subscription, {
                   title: '⏰ ' + task.title,
                   body: task.note || 'Reminder time!',
                   tag: task.id,
                   requireInteraction: task.priority === 'high',
                 });
-                task.notified = true;
+                // 404/410 = subscription is gone; stop trying to use it.
+                if (status === 404 || status === 410) {
+                  await env.DB.prepare('DELETE FROM push_subscriptions WHERE user_id = ?').bind(user_id).run();
+                }
+                // Mark as notified on success or any permanent client error so we
+                // don't re-send every minute. Transient (0/5xx) errors retry later.
+                if (status >= 200 && status < 500) task.notified = true;
               }
             }
           }
@@ -294,17 +300,142 @@ function json(data, status = 200, headers = {}) {
   });
 }
 
-// Helper: Send Web Push notification
-async function sendPushNotification(subscription, payload) {
+// ===========================================================================
+// Web Push (VAPID + aes128gcm) implemented with the WebCrypto API only.
+// The `web-push` npm package does NOT run in the Cloudflare Workers runtime,
+// so we build the request by hand following RFC 8291 (encryption) and the
+// VAPID spec (RFC 8292). This sends real push messages that wake the device
+// even when Daysie is closed.
+// ===========================================================================
+
+// Fallback public key (matches the key baked into the front-end). The private
+// key MUST be provided as a Worker secret: VAPID_PRIVATE_KEY.
+const VAPID_PUBLIC_FALLBACK = 'BCbfGHSDEXclbsTnL3DjwZxyaLTXhlge4D6wNonqGwOfkLgA19fFyfz7j0nmBD0GxQJp4MNDPfWigOzFvLCyinU';
+
+function b64urlToBytes(s) {
+  s = String(s).replace(/-/g, '+').replace(/_/g, '/');
+  const pad = s.length % 4;
+  if (pad) s += '='.repeat(4 - pad);
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function bytesToB64url(bytes) {
+  const b = new Uint8Array(bytes);
+  let bin = '';
+  for (let i = 0; i < b.length; i++) bin += String.fromCharCode(b[i]);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function concatBytes(...arrs) {
+  let len = 0;
+  for (const a of arrs) len += a.length;
+  const out = new Uint8Array(len);
+  let o = 0;
+  for (const a of arrs) { out.set(a, o); o += a.length; }
+  return out;
+}
+
+async function hmacSha256(keyBytes, dataBytes) {
+  const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return new Uint8Array(await crypto.subtle.sign('HMAC', key, dataBytes));
+}
+
+// Single-block HKDF (output length <= 32 bytes), as used by Web Push.
+async function hkdf(salt, ikm, info, length) {
+  const prk = await hmacSha256(salt, ikm);
+  const out = await hmacSha256(prk, concatBytes(info, new Uint8Array([1])));
+  return out.slice(0, length);
+}
+
+async function importVapidSigningKey(env) {
+  const pub = b64urlToBytes(env.VAPID_PUBLIC_KEY || VAPID_PUBLIC_FALLBACK);
+  const d = String(env.VAPID_PRIVATE_KEY).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const jwk = {
+    kty: 'EC',
+    crv: 'P-256',
+    x: bytesToB64url(pub.slice(1, 33)),
+    y: bytesToB64url(pub.slice(33, 65)),
+    d,
+    ext: true,
+  };
+  return crypto.subtle.importKey('jwk', jwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
+}
+
+async function createVapidJWT(env, audience) {
+  const enc = (obj) => bytesToB64url(new TextEncoder().encode(JSON.stringify(obj)));
+  const header = { typ: 'JWT', alg: 'ES256' };
+  const payload = {
+    aud: audience,
+    exp: Math.floor(Date.now() / 1000) + 12 * 60 * 60,
+    sub: env.VAPID_SUBJECT || 'mailto:notify@daysie.app',
+  };
+  const unsigned = enc(header) + '.' + enc(payload);
+  const key = await importVapidSigningKey(env);
+  const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key, new TextEncoder().encode(unsigned));
+  return unsigned + '.' + bytesToB64url(new Uint8Array(sig));
+}
+
+// RFC 8291 aes128gcm encryption of the push payload.
+async function encryptPayload(subscription, payloadBytes) {
+  const te = new TextEncoder();
+  const uaPublic = b64urlToBytes(subscription.keys.p256dh); // 65 bytes
+  const authSecret = b64urlToBytes(subscription.keys.auth); // 16 bytes
+
+  // Ephemeral application-server ECDH key pair.
+  const asKeyPair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+  const asPublicRaw = new Uint8Array(await crypto.subtle.exportKey('raw', asKeyPair.publicKey)); // 65 bytes
+
+  const uaKey = await crypto.subtle.importKey('raw', uaPublic, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+  const ecdhSecret = new Uint8Array(await crypto.subtle.deriveBits({ name: 'ECDH', public: uaKey }, asKeyPair.privateKey, 256));
+
+  // Derive the input keying material (RFC 8291 §3.4).
+  const prkKey = await hmacSha256(authSecret, ecdhSecret);
+  const keyInfo = concatBytes(te.encode('WebPush: info'), new Uint8Array([0]), uaPublic, asPublicRaw);
+  const ikm = (await hmacSha256(prkKey, concatBytes(keyInfo, new Uint8Array([1])))).slice(0, 32);
+
+  // Content-encryption key + nonce (RFC 8188).
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const cek = await hkdf(salt, ikm, te.encode('Content-Encoding: aes128gcm\0'), 16);
+  const nonce = await hkdf(salt, ikm, te.encode('Content-Encoding: nonce\0'), 12);
+
+  // Single record: payload followed by the 0x02 last-record delimiter.
+  const plaintext = concatBytes(payloadBytes, new Uint8Array([2]));
+  const aesKey = await crypto.subtle.importKey('raw', cek, { name: 'AES-GCM' }, false, ['encrypt']);
+  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce, tagLength: 128 }, aesKey, plaintext));
+
+  // aes128gcm header: salt(16) | rs(4, big-endian) | idlen(1) | keyid | ciphertext
+  const rs = new Uint8Array([0, 0, 0x10, 0]); // record size 4096
+  const idlen = new Uint8Array([asPublicRaw.length]);
+  return concatBytes(salt, rs, idlen, asPublicRaw, ciphertext);
+}
+
+// Helper: Send a Web Push notification. Returns the HTTP status code (or 0 on error).
+async function sendPushNotification(env, subscription, payload) {
   try {
-    const webpush = await import('web-push');
-    webpush.setVapidDetails(
-      'mailto:you@example.com',
-      process.env.VAPID_PUBLIC_KEY,
-      process.env.VAPID_PRIVATE_KEY
-    );
-    await webpush.sendNotification(subscription, JSON.stringify(payload));
+    if (!env.VAPID_PRIVATE_KEY) {
+      console.error('Push send error: VAPID_PRIVATE_KEY secret is not set');
+      return 0;
+    }
+    const endpoint = subscription.endpoint;
+    const audience = new URL(endpoint).origin;
+    const jwt = await createVapidJWT(env, audience);
+    const body = await encryptPayload(subscription, new TextEncoder().encode(JSON.stringify(payload)));
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Encoding': 'aes128gcm',
+        'Content-Type': 'application/octet-stream',
+        'TTL': '86400',
+        'Authorization': 'vapid t=' + jwt + ', k=' + (env.VAPID_PUBLIC_KEY || VAPID_PUBLIC_FALLBACK),
+      },
+      body,
+    });
+    return res.status;
   } catch (error) {
     console.error('Push send error:', error);
+    return 0;
   }
 }
