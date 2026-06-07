@@ -1314,6 +1314,32 @@ body[data-theme="dark"] .modal-close {
     flex-direction: column;
   }
 
+  /* Tighter, tidier spacing for dialogs on small screens */
+  .modal {
+    padding: 16px;
+  }
+
+  .modal .label {
+    margin: 9px 0 5px;
+  }
+
+  .modal label {
+    margin: 8px 0;
+  }
+
+  .modal .chips {
+    margin-bottom: 9px;
+    gap: 6px;
+  }
+
+  .modal .row {
+    gap: 9px;
+  }
+
+  .modal-actions {
+    margin-top: 12px;
+  }
+
   .topbar {
     align-items: flex-start;
   }
