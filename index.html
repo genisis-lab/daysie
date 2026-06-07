@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#fff7ed" />
+  <title>Daysie — Reminders & Journal</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <canvas id="garden"></canvas>
+  <div id="toastHost"></div>
+
+  <section id="welcome" class="welcome">
+    <div class="logo big">🌼</div>
+    <h1>Daysie</h1>
+    <p>Your gentle family helper for remembering tasks, writing little reflections, and growing one day at a time.</p>
+    <div class="welcome-grid">
+      <article><b>⏰ Friendly reminders</b><span>Set a task, time, repeat, and priority.</span></article>
+      <article><b>📖 Cozy journal</b><span>Track moods, prompts, tags, and memories.</span></article>
+      <article><b>🌈 Gentle insights</b><span>Streaks, wins, and weekly mood patterns.</span></article>
+    </div>
+    <input id="nameInput" maxlength="24" placeholder="What should Daysie call you?" />
+    <button id="startBtn" class="primary wide">Let’s begin ✨</button>
+  </section>
+
+  <main id="app" class="app hidden">
+    <header class="topbar">
+      <div class="brand"><div class="logo">🌼</div><div><h1>Daysie</h1><p>remember · reflect · grow</p></div></div>
+      <div class="hello"><b id="helloText">Hi!</b><span id="dateText"></span></div>
+    </header>
+
+    <aside id="notifyBanner" class="banner hidden">
+      <span>🔔</span>
+      <p><b>Turn on reminders</b><small>Allow notifications so Daysie can nudge you on time.</small></p>
+      <button id="notifyBtn">Allow</button>
+    </aside>
+
+    <section id="todayView" class="view">
+      <article class="hero-card"><span>🔥</span><b id="streakNum">0</b><p id="streakText">Check in today to start your streak.</p></article>
+      <div class="section-head"><h2>☀️ Today’s plan</h2><button class="primary small" data-open-task>+ Add</button></div>
+      <div id="todayTasks"></div>
+      <article class="card center"><h2>💫 A little moment</h2><p id="dailyQuote"></p><button class="soft small" data-tab="journal">Write in journal ✍️</button></article>
+    </section>
+
+    <section id="tasksView" class="view hidden">
+      <div class="section-head"><h2>⏰ Reminders & tasks</h2><button class="primary small" data-open-task>+ Add</button></div>
+      <div id="taskList"></div>
+    </section>
+
+    <section id="journalView" class="view hidden">
+      <h2>📖 How are you today?</h2>
+      <article class="card">
+        <div id="moodPicker" class="moods"></div>
+        <div class="prompt"><small>✨ Today’s prompt</small><b id="promptText"></b><button id="nextPrompt" class="soft tiny">Try another</button></div>
+        <textarea id="journalText" placeholder="Write freely — one sentence counts..."></textarea>
+        <p class="label">Tag this moment</p>
+        <div id="tagPicker" class="chips"></div>
+        <button id="saveEntry" class="primary wide">Save entry 💛</button>
+      </article>
+      <div class="section-head"><h2>📚 Your journal</h2><input id="searchEntries" placeholder="Search..." /></div>
+      <div id="entries"></div>
+    </section>
+
+    <section id="insightsView" class="view hidden">
+      <h2>🌈 Your insights</h2>
+      <div id="stats" class="stats"></div>
+      <article class="card"><h2>😊 Mood this week</h2><div id="moodBars" class="bars"></div></article>
+      <article class="card"><h2>🏅 Little wins</h2><div id="badges"></div></article>
+      <button id="exportBtn" class="soft wide">⬇️ Export my data</button>
+    </section>
+  </main>
+
+  <button id="fab" class="fab hidden" data-open-task>+</button>
+  <nav id="tabs" class="tabs hidden">
+    <button class="active" data-tab="today">☀️<span>Today</span></button>
+    <button data-tab="tasks">⏰<span>Tasks</span></button>
+    <button data-tab="journal">📖<span>Journal</span></button>
+    <button data-tab="insights">🌈<span>Insights</span></button>
+  </nav>
+
+  <dialog id="taskDialog">
+    <form method="dialog" class="modal" id="taskForm">
+      <h2 id="dialogTitle">⏰ New reminder</h2>
+      <label>What do you need to do?<input id="taskTitle" required maxlength="120" placeholder="e.g. Take medicine, Call Grandma" /></label>
+      <div class="row"><label>Day<input id="taskDate" type="date" /></label><label>Time<input id="taskTime" type="time" /></label></div>
+      <p class="label">Priority</p><div id="priorityPicker" class="chips"><button type="button" data-priority="low">🌿 Easy</button><button type="button" data-priority="med">⭐ Normal</button><button type="button" data-priority="high">🌸 Important</button></div>
+      <p class="label">Repeat</p><div id="repeatPicker" class="chips"><button type="button" data-repeat="none">Once</button><button type="button" data-repeat="daily">Daily</button><button type="button" data-repeat="weekly">Weekly</button><button type="button" data-repeat="monthly">Monthly</button></div>
+      <label>Notes<textarea id="taskNote" placeholder="Optional details..."></textarea></label>
+      <div class="row"><button value="cancel" class="soft">Cancel</button><button id="saveTaskBtn" value="default" class="primary">Save reminder</button></div>
+    </form>
+  </dialog>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" defer></script>
+  <script src="app.js" defer></script>
+</body>
+</html>
