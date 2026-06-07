@@ -94,7 +94,7 @@ let renagTimer = null;
 
 // App build version. Must match version.json on the server. Bump both on every
 // deploy so open tabs can detect a new release and show the refresh banner.
-const APP_VERSION = '2026.06.07-8';
+const APP_VERSION = '2026.06.07-9';
 let swRegistration = null;
 let updateBannerShown = false;
 
@@ -1590,13 +1590,42 @@ $('#syncNowBtn').onclick = async () => {
 // Stop any pairing polls when the settings dialog is closed
 $('#settingsDialog')?.addEventListener('close', () => { stopPairPolling(); stopStatusPolling(); });
 
+// Journal photos are stored as base64 data-URLs and can be several MB each.
+// Cloudflare D1 rejects oversized values (SQLITE_TOOBIG), so we never send
+// photos to the cloud. They stay on the device that created them; tasks and
+// journal text still sync across devices.
+function stripPhotosForSync(profiles) {
+  return (profiles || []).map((p) => ({
+    ...p,
+    entries: (p.entries || []).map((e) => (e.photos && e.photos.length ? { ...e, photos: [] } : e)),
+  }));
+}
+
+// Restore device-local photos onto pulled (photo-less) profiles so a sync
+// never wipes the photos held on this device.
+function mergeLocalPhotos(remoteProfiles) {
+  const localPhotos = {};
+  (db.profiles || []).forEach((p) => {
+    const em = {};
+    (p.entries || []).forEach((e) => { if (e.photos && e.photos.length) em[e.id] = e.photos; });
+    localPhotos[p.id] = em;
+  });
+  (remoteProfiles || []).forEach((p) => {
+    const em = localPhotos[p.id] || {};
+    (p.entries || []).forEach((e) => {
+      if ((!e.photos || !e.photos.length) && em[e.id]) e.photos = em[e.id];
+    });
+  });
+  return remoteProfiles;
+}
+
 async function syncToCloud() {
   if (!settings.authToken) return;
   try {
     await fetch('https://daysie-api.neil27.workers.dev/data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.authToken}` },
-      body: JSON.stringify({ profiles: db.profiles }),
+      body: JSON.stringify({ profiles: stripPhotosForSync(db.profiles) }),
     });
   } catch (e) {
     console.error('Sync error:', e);
@@ -1612,8 +1641,8 @@ async function pullFromCloud() {
     if (res.ok) {
       const data = await res.json();
       if (data.profiles && data.profiles.length > 0) {
-        // Merge (simple last-write-wins for now)
-        db.profiles = data.profiles;
+        // Last-write-wins for tasks/text, but keep this device's local photos.
+        db.profiles = mergeLocalPhotos(data.profiles);
         save();
         renderAll();
       }
