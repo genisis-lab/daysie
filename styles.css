@@ -1503,3 +1503,63 @@ body[data-theme="dark"] .modal-close {
     font-size: 0.6rem;
   }
 }
+
+/* ===== v2026.06.07-6 additions ===== */
+
+/* Settings/dialog scroll lock: prevent the page behind a modal from scrolling */
+html:has(dialog[open]) { overflow: hidden; }
+
+/* Subtasks / checklist (task card) */
+.subtasks { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.subtask { display: flex; align-items: center; gap: 8px; border: 1.5px solid var(--line); background: var(--card); border-radius: 12px; padding: 7px 10px; font-weight: 700; color: var(--ink); text-align: left; font-size: 0.9rem; width: 100%; }
+.subtask .subcheck { flex: 0 0 18px; width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); display: grid; place-items: center; font-size: 0.7rem; color: #fff; }
+.subtask.done .subcheck { background: var(--green); border-color: var(--green); }
+.subtask.done .subtext { text-decoration: line-through; color: var(--soft); }
+
+/* Subtask editor (task dialog) */
+.subtask-edit-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.subtask-edit { display: flex; align-items: center; gap: 8px; background: var(--card); border: 1.5px solid var(--line); border-radius: 12px; padding: 8px 10px; }
+.subtask-edit span { flex: 1; font-weight: 700; word-break: break-word; }
+.subtask-add-row { display: flex; gap: 8px; align-items: stretch; }
+.subtask-add-row input { flex: 1; }
+.subtask-add-row button { white-space: nowrap; }
+
+/* Edit-entry photo removal */
+.edit-photos { gap: 10px; }
+.edit-photo-wrap { position: relative; }
+.edit-photo-wrap img { width: 80px; height: 80px; object-fit: cover; border-radius: 12px; border: 1.5px solid var(--line); }
+.photo-remove { position: absolute; top: -6px; right: -6px; width: 24px; height: 24px; border-radius: 50%; border: 0; background: #ff5f76; color: #fff; font-size: 13px; font-weight: 900; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.25); display: grid; place-items: center; }
+.subtask-edit .photo-remove { position: static; flex: 0 0 24px; }
+
+/* Lightbox share/save button */
+.lightbox-share { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 14px); left: 16px; width: 46px; height: 46px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, 0.16); color: #fff; font-size: 20px; cursor: pointer; }
+
+/* Calendar photo thumbnails */
+.cal-day { overflow: hidden; }
+.cal-thumb { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.4; pointer-events: none; z-index: 0; }
+.cal-day .cal-num { position: relative; z-index: 1; }
+.cal-day.has-photo .cal-num { font-weight: 900; text-shadow: 0 1px 3px rgba(255, 255, 255, 0.9); }
+body[data-theme="dark"] .cal-day.has-photo .cal-num { text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9); }
+.cal-photos-head { font-weight: 900; color: var(--soft); margin: 14px 0 8px; }
+
+/* Mood trend (month) */
+.mood-trend { display: flex; align-items: flex-end; gap: 3px; height: 120px; }
+.trend-col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; min-width: 0; }
+.trend-col i { display: block; width: 100%; border-radius: 5px 5px 2px 2px; min-height: 6px; }
+.trend-col small { font-size: 0.58rem; color: var(--muted); font-weight: 800; margin-top: 3px; height: 0.85em; line-height: 1; }
+
+/* Snooze options */
+.snooze-options { flex-direction: column; }
+.snooze-options button { width: 100%; text-align: left; padding: 12px 14px; font-size: 0.95rem; }
+
+/* Dark-mode contrast polish */
+body[data-theme="dark"] .banner { background: #3a3420; }
+body[data-theme="dark"] .banner small { color: #ffcd57; }
+body[data-theme="dark"] .banner button { background: var(--bg2); color: var(--sun); }
+body[data-theme="dark"] .prompt small { color: #79c8ce; }
+body[data-theme="dark"] .account-card { background: #1a2a2c; border-color: #2a4a4e; }
+body[data-theme="dark"] .week-task { color: var(--ink); }
+body[data-theme="dark"] .photo-label { color: var(--soft); }
+body[data-theme="dark"] .meta .late { background: #4a2230; color: #ff9bb0; }
+body[data-theme="dark"] .toast { border-left-color: var(--sun); }
+body[data-theme="dark"] .cal-day.today { background: linear-gradient(135deg, #3a3420, #3a2c20); }
