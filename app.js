@@ -94,7 +94,7 @@ let renagTimer = null;
 
 // App build version. Must match version.json on the server. Bump both on every
 // deploy so open tabs can detect a new release and show the refresh banner.
-const APP_VERSION = '2026.06.07-7';
+const APP_VERSION = '2026.06.07-8';
 let swRegistration = null;
 let updateBannerShown = false;
 
@@ -190,6 +190,11 @@ function boot() {
   else $('#welcome').classList.remove('hidden');
 
   setupServiceWorker();
+  // Re-arm background push on every launch. A new service worker ships with
+  // every deploy, and iOS can silently drop the existing push subscription
+  // when the worker updates — which is why reminders stop arriving after an
+  // update. Re-registering it here keeps closed-app reminders working.
+  refreshPushSubscription();
 }
 
 // ---- App updates: service worker + version banner -------------------------
@@ -1700,6 +1705,41 @@ async function enableNotifications() {
   } catch (e) {
     console.error(e);
     toast('🔔 Reminders on for this device', 'Closed-app reminders couldn\'t be set up, but alerts show while Daysie is open.');
+  }
+}
+
+// Keep the server's push subscription fresh. The browser may replace the
+// PushSubscription when the service worker updates (notably on iOS after a
+// deploy); when that happens the subscription saved on the server becomes
+// stale, the push service returns 410, and the Worker drops it — so
+// background reminders silently stop. Re-acquiring and re-uploading the
+// subscription on each launch keeps closed-app reminders alive.
+async function refreshPushSubscription() {
+  try {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    if (isIOS() && !isStandalone()) return; // iOS only delivers push to installed PWAs
+    const ready = await ensureAccount();
+    if (!ready) return;
+    const registration = await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array('BCbfGHSDEXclbsTnL3DjwZxyaLTXhlge4D6wNonqGwOfkLgA19fFyfz7j0nmBD0GxQJp4MNDPfWigOzFvLCyinU'),
+      });
+    }
+    settings.pushSubscription = subscription;
+    saveSettings();
+    await fetch(`${API}/push/subscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.authToken}` },
+      body: JSON.stringify(subscription),
+    });
+    // Make sure the server also has the latest tasks/due-times to notify about.
+    await syncToCloud();
+  } catch (e) {
+    console.error('Push refresh error:', e);
   }
 }
 
