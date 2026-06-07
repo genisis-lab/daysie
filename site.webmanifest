@@ -1,0 +1,12 @@
+{
+  "name": "Daysie — Reminders & Journal",
+  "short_name": "Daysie",
+  "description": "A gentle family-friendly reminders and journal app.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#fff7ed",
+  "theme_color": "#f3ad32",
+  "icons": [
+    { "src": "favicon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any maskable" }
+  ]
+}
