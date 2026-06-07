@@ -12,7 +12,7 @@ export default {
 
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     };
 
@@ -188,6 +188,43 @@ export default {
         return json({ success: true }, 200, corsHeaders);
       }
 
+      // PHOTO: upload a journal photo to R2 object storage (auth required).
+      // Photos are too large to live in D1 (SQLITE_TOOBIG), so the bytes go to
+      // R2 and only a small key is stored in the synced JSON.
+      if (path === '/photo' && request.method === 'POST') {
+        const userId = await getUserFromAuth(request, env);
+        if (!userId) return json({ error: 'Unauthorized' }, 401, corsHeaders);
+        if (!env.PHOTOS) return json({ error: 'Photo storage not configured' }, 503, corsHeaders);
+        const contentType = request.headers.get('Content-Type') || 'image/jpeg';
+        const key = `${userId}/${crypto.randomUUID()}`;
+        await env.PHOTOS.put(key, request.body, { httpMetadata: { contentType } });
+        return json({ key }, 200, corsHeaders);
+      }
+
+      // PHOTO: fetch a stored photo. The key embeds an unguessable UUID, so it is
+      // served without auth (an <img> tag cannot send an Authorization header).
+      if (path.startsWith('/photo/') && request.method === 'GET') {
+        if (!env.PHOTOS) return json({ error: 'Photo storage not configured' }, 503, corsHeaders);
+        const key = decodeURIComponent(path.slice('/photo/'.length));
+        const obj = await env.PHOTOS.get(key);
+        if (!obj) return json({ error: 'Not found' }, 404, corsHeaders);
+        const headers = new Headers(corsHeaders);
+        headers.set('Content-Type', (obj.httpMetadata && obj.httpMetadata.contentType) || 'image/jpeg');
+        headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+        return new Response(obj.body, { status: 200, headers });
+      }
+
+      // PHOTO: delete a stored photo (auth required; may only touch your own keys).
+      if (path.startsWith('/photo/') && request.method === 'DELETE') {
+        const userId = await getUserFromAuth(request, env);
+        if (!userId) return json({ error: 'Unauthorized' }, 401, corsHeaders);
+        if (!env.PHOTOS) return json({ error: 'Photo storage not configured' }, 503, corsHeaders);
+        const key = decodeURIComponent(path.slice('/photo/'.length));
+        if (!key.startsWith(userId + '/')) return json({ error: 'Forbidden' }, 403, corsHeaders);
+        await env.PHOTOS.delete(key);
+        return json({ success: true }, 200, corsHeaders);
+      }
+
       return json({ error: 'Not found' }, 404, corsHeaders);
     } catch (error) {
       console.error('Worker error:', error);
@@ -216,9 +253,11 @@ export default {
 
               if (subRow) {
                 const subscription = JSON.parse(subRow.subscription);
+                const assignee = task.assignee ? profiles.find((p) => p.id === task.assignee) : null;
+                const prefix = assignee && assignee.id !== profile.id ? `For ${assignee.name}: ` : '';
                 const status = await sendPushNotification(env, subscription, {
                   title: '⏰ ' + task.title,
-                  body: task.note || 'Reminder time!',
+                  body: prefix + (task.note || 'Reminder time!'),
                   tag: task.id,
                   requireInteraction: task.priority === 'high',
                 });
