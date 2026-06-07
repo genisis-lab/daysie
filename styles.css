@@ -1332,7 +1332,9 @@ body[data-theme="dark"] .modal-close {
   }
 
   .fab {
-    bottom: 76px;
+    /* Sit clearly above the tab bar (incl. the home-indicator safe area)
+       so it never overlaps the rightmost Insights tab. */
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 86px);
     right: 16px;
   }
 
