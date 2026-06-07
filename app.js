@@ -90,7 +90,7 @@ let renagTimer = null;
 
 // App build version. Must match version.json on the server. Bump both on every
 // deploy so open tabs can detect a new release and show the refresh banner.
-const APP_VERSION = '2026.06.07-1';
+const APP_VERSION = '2026.06.07-2';
 let swRegistration = null;
 let updateBannerShown = false;
 
@@ -303,17 +303,7 @@ function showNotifyBanner() {
   $('#notifyBanner').classList.toggle('hidden', Notification.permission === 'granted');
 }
 
-$('#notifyBtn').onclick = async () => {
-  if (!('Notification' in window)) {
-    if (isIOS() && !isStandalone()) {
-      return toast('📲 Add Daysie to your Home Screen', 'On iPhone, tap the Share icon, then "Add to Home Screen", and open Daysie from there to turn on notifications.');
-    }
-    return toast('Notifications unavailable', 'This browser does not support them.');
-  }
-  const p = await Notification.requestPermission();
-  showNotifyBanner();
-  toast(p === 'granted' ? '🔔 Reminders on!' : 'No problem', 'In-app alerts will still show while Daysie is open.');
-};
+$('#notifyBtn').onclick = () => enableNotifications();
 
 function buildPickers() {
   // Mood picker (journal)
@@ -1356,17 +1346,61 @@ async function pullFromCloud() {
 }
 
 // PUSH NOTIFICATIONS
-$('#subscribePushBtn').onclick = async () => {
-  if (!settings.authToken) {
-    toast('🔑 Turn on sync first', 'Tap "Turn on sync" under "Sync & account" above, then enable push.');
-    $('#enableSyncBtn')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    $('#enableSyncBtn')?.focus();
-    return;
+// Silently provision an anonymous cloud account the first time it's needed.
+// Closed-app push requires the server to hold the subscription + due times, so
+// enabling notifications quietly turns on sync behind the scenes — there is no
+// separate step for the user to think about.
+async function ensureAccount() {
+  if (settings.authToken) return true;
+  try {
+    const res = await fetch(`${API}/account/create`, { method: 'POST' });
+    if (!res.ok) throw new Error('create failed');
+    const data = await res.json();
+    settings.authToken = data.token;
+    settings.userId = data.userId;
+    saveSettings();
+    updateAccountUI();
+    updateSyncStatus();
+    return true;
+  } catch (e) {
+    console.error('Auto account error:', e);
+    return false;
   }
+}
+
+// Unified "enable notifications" flow shared by the home banner and Settings.
+// Asks for permission, then silently sets up background push so reminders fire
+// even when Daysie is closed — no visible "turn on sync" step required.
+async function enableNotifications() {
+  // iOS only delivers web notifications to Home Screen installs.
   if (isIOS() && !isStandalone()) {
-    return toast('📲 Add Daysie to your Home Screen', 'On iPhone, push only works after you add Daysie to your Home Screen (Share, then Add to Home Screen) and open it from there.');
+    return toast('📲 Add Daysie to your Home Screen', 'On iPhone, notifications only work after you add Daysie to your Home Screen (tap Share, then "Add to Home Screen") and open it from there.');
   }
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return toast('Not supported', 'Your browser does not support push notifications.');
+  if (!('Notification' in window)) {
+    return toast('Notifications unavailable', 'This browser does not support them.');
+  }
+
+  // 1) Ask for permission if we don't have it yet.
+  let perm = Notification.permission;
+  if (perm === 'default') perm = await Notification.requestPermission();
+  showNotifyBanner();
+  if (perm === 'denied') {
+    return toast('🔔 Notifications are blocked', 'Allow them for Daysie in your browser settings, then try again.');
+  }
+  if (perm !== 'granted') {
+    return toast('No problem', 'In-app alerts will still show while Daysie is open.');
+  }
+
+  // 2) Register for background push (works even when Daysie is closed).
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return toast('🔔 Reminders on!', 'Alerts will show while Daysie is open.');
+  }
+
+  toast('🔔 Setting up notifications…', '');
+  const ready = await ensureAccount();
+  if (!ready) {
+    return toast('🔔 Reminders on for this device', 'Couldn\'t set up closed-app reminders right now — they\'ll still show while Daysie is open.');
+  }
 
   try {
     const registration = await navigator.serviceWorker.ready;
@@ -1375,8 +1409,7 @@ $('#subscribePushBtn').onclick = async () => {
       applicationServerKey: urlBase64ToUint8Array('BCbfGHSDEXclbsTnL3DjwZxyaLTXhlge4D6wNonqGwOfkLgA19fFyfz7j0nmBD0GxQJp4MNDPfWigOzFvLCyinU'),
     });
 
-    // Send subscription to Worker
-    const res = await fetch('https://daysie-api.neil27.workers.dev/push/subscribe', {
+    const res = await fetch(`${API}/push/subscribe`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.authToken}` },
       body: JSON.stringify(subscription),
@@ -1385,15 +1418,19 @@ $('#subscribePushBtn').onclick = async () => {
     if (res.ok) {
       settings.pushSubscription = subscription;
       saveSettings();
-      toast('🔔 Push enabled!', 'You\'ll get reminders even when Daysie is closed.');
+      // Make sure the server has the latest tasks/due-times to notify about.
+      await syncToCloud();
+      toast('🔔 Notifications on!', 'You\'ll get reminders even when Daysie is closed.');
     } else {
-      toast('❌ Failed', 'Could not register push subscription.');
+      toast('🔔 Reminders on for this device', 'Closed-app reminders couldn\'t be registered, but alerts show while Daysie is open.');
     }
   } catch (e) {
     console.error(e);
-    toast('❌ Error', 'Could not subscribe to push.');
+    toast('🔔 Reminders on for this device', 'Closed-app reminders couldn\'t be set up, but alerts show while Daysie is open.');
   }
-};
+}
+
+$('#subscribePushBtn').onclick = () => enableNotifications();
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
