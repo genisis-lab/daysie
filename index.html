@@ -139,6 +139,7 @@
         <h2>📚 Your journal</h2>
         <input id="searchEntries" placeholder="Search..." style="max-width:160px" />
       </div>
+      <div id="entryTagFilter" class="filter-bar"></div>
       <div id="entries"></div>
     </section>
 
@@ -147,6 +148,7 @@
       <h2>🌈 Your insights</h2>
       <div id="stats" class="stats"></div>
       <article class="card"><h2>😊 Mood this week</h2><div id="moodBars" class="bars"></div></article>
+      <article class="card"><h2>📈 Mood this month</h2><div id="moodTrend" class="mood-trend"></div></article>
       <article class="card"><h2>🏅 Little wins</h2><div id="badges"></div></article>
       <div class="row" style="margin-top:12px">
         <button id="exportBtn" class="soft">⬇️ Export JSON</button>
@@ -194,7 +196,17 @@
         <button type="button" data-repeat="monthly">Monthly</button>
         <button type="button" data-repeat="yearly">Yearly 🎂</button>
       </div>
+      <div id="repeatUntilWrap" class="hidden">
+        <p class="label">Repeat until (optional)</p>
+        <input id="taskRepeatUntil" type="date" />
+      </div>
       <label>Notes<textarea id="taskNote" placeholder="Optional details..."></textarea></label>
+      <p class="label">Subtasks / checklist</p>
+      <div id="subtaskList" class="subtask-edit-list"></div>
+      <div class="subtask-add-row">
+        <input id="subtaskInput" maxlength="80" placeholder="Add a step..." />
+        <button type="button" id="addSubtaskBtn" class="soft small">+ Add</button>
+      </div>
       <div class="row modal-actions">
         <button type="button" id="cancelTaskBtn" class="soft">Cancel</button>
         <button type="button" id="saveTaskBtn" class="primary">Save reminder</button>
@@ -208,6 +220,8 @@
       <h2>✏️ Edit entry</h2>
       <div id="editMoodPicker" class="moods"></div>
       <textarea id="editEntryText" style="min-height:120px"></textarea>
+      <p class="label">Photos</p>
+      <div id="editPhotos" class="photo-preview edit-photos"></div>
       <div class="row modal-actions">
         <button type="button" id="cancelEditEntry" class="soft">Cancel</button>
         <button type="button" id="saveEditEntry" class="primary">Save changes</button>
@@ -313,9 +327,27 @@
     </div>
   </dialog>
 
+  <!-- SNOOZE DIALOG -->
+  <dialog id="snoozeDialog">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>😴 Snooze reminder</h2>
+        <button type="button" id="closeSnoozeTop" class="modal-close" title="Close" aria-label="Close">✕</button>
+      </div>
+      <p style="color:var(--soft);font-weight:700">When should Daysie remind you again?</p>
+      <div class="chips snooze-options">
+        <button type="button" data-snooze-min="10">⏱️ 10 minutes</button>
+        <button type="button" data-snooze-min="60">🕐 1 hour</button>
+        <button type="button" data-snooze-min="180">🕒 3 hours</button>
+        <button type="button" data-snooze-tomorrow="1">🌅 Tomorrow 9 AM</button>
+      </div>
+    </div>
+  </dialog>
+
   <!-- PHOTO LIGHTBOX -->
   <div id="lightbox" class="lightbox hidden" role="dialog" aria-modal="true" aria-label="Photo viewer">
     <button type="button" id="lightboxClose" class="lightbox-close" title="Close" aria-label="Close">✕</button>
+    <button type="button" id="lightboxShare" class="lightbox-share" title="Share or save" aria-label="Share or save photo">⬇️</button>
     <button type="button" id="lightboxPrev" class="lightbox-nav prev hidden" aria-label="Previous photo">‹</button>
     <img id="lightboxImg" alt="Journal photo" />
     <button type="button" id="lightboxNext" class="lightbox-nav next hidden" aria-label="Next photo">›</button>
