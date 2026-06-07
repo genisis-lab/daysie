@@ -85,17 +85,17 @@ The `wrangler.toml` already includes a cron trigger (`* * * * *` = every minute)
 
 1. Open your Daysie site
 2. Go to Settings (⚙️)
-3. Enter your email and click "Send magic link"
-4. Check your email for the 6-digit code
-5. Enter the code and sign in
+3. Click "Turn on sync" to create an account on this device
+4. On a second device, open Daysie → Settings → "I have a code"
+5. On the first device tap "Link another device", enter that code on the second device, then approve the prompt on the first device
 6. Create a task with a near-future reminder
 7. Enable push notifications when prompted
 8. Close the app and wait for the reminder time
 9. You should receive a push notification!
 
-## Optional: Email Configuration
+## Device Pairing (how sign-in works)
 
-By default, the Worker uses MailChannels (free for Cloudflare Workers). If you need a custom domain for emails, update the `sendEmail` function in `worker.js`.
+Daysie uses device pairing instead of email. The first device calls `/account/create` to make an account. To add another device, the signed-in device generates a short code (`/pair/create`); the new device submits it (`/pair/redeem`) and waits while the original device approves the request (`/pair/approve`). Codes are single-use, expire in ~3 minutes, are limited to one active code per account, and redeem attempts are rate-limited per IP. No email provider or domain is required.
 
 ## Monitoring
 
@@ -126,9 +126,11 @@ For a family app, you'll stay well within free tier limits! 🌼
 - Check that the Worker URL in `app.js` matches your deployed Worker
 - Check Worker logs: `wrangler tail`
 
-### Magic link code not received
-- Check Worker logs for email errors
-- MailChannels is free but may have rate limits
+### Pairing code not working
+- Codes expire after ~3 minutes — generate a fresh one
+- Make sure the new device's request was approved on the original device
+- If you see "too many attempts", wait a minute (per-IP rate limit) and retry
+- Check Worker logs: `wrangler tail`
 
 ### Push notifications not working
 - Ensure VAPID keys are set correctly
@@ -136,6 +138,6 @@ For a family app, you'll stay well within free tier limits! 🌼
 - Verify Service Worker is registered (DevTools > Application > Service Workers)
 
 ### Data not syncing
-- Check that you're signed in (Settings should show your email)
+- Check that sync is on (Settings should show "Sync is on")
 - Click "Sync now" to force a sync
 - Check Worker logs for errors
