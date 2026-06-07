@@ -90,7 +90,7 @@ let renagTimer = null;
 
 // App build version. Must match version.json on the server. Bump both on every
 // deploy so open tabs can detect a new release and show the refresh banner.
-const APP_VERSION = '2026.06.07-4';
+const APP_VERSION = '2026.06.07-5';
 let swRegistration = null;
 let updateBannerShown = false;
 
@@ -808,7 +808,7 @@ function renderEntries() {
           <button class="icon" data-delete-entry="${e.id}">🗑️</button>
         </div>
         ${e.text ? `<p class="entry-text">${esc(e.text)}</p>` : ''}
-        ${e.photos && e.photos.length ? `<div class="entry-photos">${e.photos.map((p) => `<img src="${p}" />`).join('')}</div>` : ''}
+        ${e.photos && e.photos.length ? `<div class="entry-photos">${e.photos.map((p, i) => `<img src="${p}" class="entry-photo" tabindex="0" alt="Journal photo ${i + 1}" />`).join('')}</div>` : ''}
         <div class="tags">${(e.tags || []).map((t) => `<span>${esc(t)}</span>`).join('')}</div>
       </article>`;
         })
@@ -844,6 +844,74 @@ function renderEntries() {
     };
   });
 }
+
+// ---- Photo lightbox ----
+let lightboxItems = [];
+let lightboxIndex = 0;
+
+function openLightbox(srcs, index) {
+  lightboxItems = srcs;
+  lightboxIndex = index;
+  renderLightbox();
+  $('#lightbox').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+
+function renderLightbox() {
+  if (!lightboxItems.length) return;
+  $('#lightboxImg').src = lightboxItems[lightboxIndex];
+  const multi = lightboxItems.length > 1;
+  $('#lightboxPrev').classList.toggle('hidden', !multi);
+  $('#lightboxNext').classList.toggle('hidden', !multi);
+  $('#lightboxCount').textContent = multi ? `${lightboxIndex + 1} / ${lightboxItems.length}` : '';
+}
+
+function closeLightbox() {
+  $('#lightbox').classList.add('hidden');
+  $('#lightboxImg').src = '';
+  document.body.style.overflow = '';
+}
+
+function lightboxStep(dir) {
+  if (!lightboxItems.length) return;
+  lightboxIndex = (lightboxIndex + dir + lightboxItems.length) % lightboxItems.length;
+  renderLightbox();
+}
+
+// Tap any journal photo to open it full-screen (event delegation survives re-renders)
+$('#entries').addEventListener('click', (ev) => {
+  const img = ev.target.closest('.entry-photo');
+  if (!img) return;
+  const imgs = [...img.closest('.entry-photos').querySelectorAll('img')];
+  openLightbox(imgs.map((n) => n.src), imgs.indexOf(img));
+});
+$('#entries').addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Enter' && ev.key !== ' ') return;
+  const img = ev.target.closest('.entry-photo');
+  if (!img) return;
+  ev.preventDefault();
+  const imgs = [...img.closest('.entry-photos').querySelectorAll('img')];
+  openLightbox(imgs.map((n) => n.src), imgs.indexOf(img));
+});
+
+$('#lightboxClose').onclick = closeLightbox;
+$('#lightboxPrev').onclick = (e) => { e.stopPropagation(); lightboxStep(-1); };
+$('#lightboxNext').onclick = (e) => { e.stopPropagation(); lightboxStep(1); };
+$('#lightbox').addEventListener('click', (e) => { if (e.target.id === 'lightbox') closeLightbox(); });
+document.addEventListener('keydown', (e) => {
+  if ($('#lightbox').classList.contains('hidden')) return;
+  if (e.key === 'Escape') closeLightbox();
+  else if (e.key === 'ArrowLeft') lightboxStep(-1);
+  else if (e.key === 'ArrowRight') lightboxStep(1);
+});
+let lbTouchX = null;
+$('#lightbox').addEventListener('touchstart', (e) => { lbTouchX = e.touches[0].clientX; }, { passive: true });
+$('#lightbox').addEventListener('touchend', (e) => {
+  if (lbTouchX === null) return;
+  const dx = e.changedTouches[0].clientX - lbTouchX;
+  if (Math.abs(dx) > 50) lightboxStep(dx < 0 ? 1 : -1);
+  lbTouchX = null;
+});
 
 $('#saveEditEntry').onclick = () => {
   const prof = getProfile();
