@@ -97,7 +97,7 @@ let assignee = null;
 
 // App build version. Must match version.json on the server. Bump both on every
 // deploy so open tabs can detect a new release and show the refresh banner.
-const APP_VERSION = '2026.06.07-10';
+const APP_VERSION = '2026.06.07-11';
 let swRegistration = null;
 let updateBannerShown = false;
 
