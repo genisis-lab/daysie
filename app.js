@@ -138,7 +138,22 @@ function toast(title, body = '') {
   const t = document.createElement('div');
   t.className = 'toast';
   t.innerHTML = `${title}<small>${body}</small>`;
-  $('#toastHost').append(t);
+  // Native <dialog> modals render in the top layer, above #toastHost, so a
+  // toast shown while Settings (or any modal) is open would be hidden behind it.
+  // When a modal dialog is open, render the toast inside it so it stays visible.
+  const openDialog = document.querySelector('dialog[open]');
+  let host;
+  if (openDialog) {
+    host = openDialog.querySelector('.dialog-toast-host');
+    if (!host) {
+      host = document.createElement('div');
+      host.className = 'dialog-toast-host';
+      openDialog.appendChild(host);
+    }
+  } else {
+    host = $('#toastHost');
+  }
+  host.append(t);
   setTimeout(() => {
     t.style.opacity = 0;
     t.style.transform = 'translateY(-8px)';

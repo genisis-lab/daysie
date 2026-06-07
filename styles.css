@@ -1225,6 +1225,20 @@ body[data-theme="dark"] .modal-close {
   pointer-events: none;
 }
 
+/* Toast host injected into an open <dialog> so alerts render in the top layer,
+   above the modal (a normal fixed element can't beat the dialog's top layer). */
+.dialog-toast-host {
+  position: fixed;
+  z-index: 1;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(94%, 430px);
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+}
+
 .toast {
   background: var(--card);
   border: 1.5px solid var(--line);
