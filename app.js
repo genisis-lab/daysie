@@ -97,7 +97,7 @@ let assignee = null;
 
 // App build version. Must match version.json on the server. Bump both on every
 // deploy so open tabs can detect a new release and show the refresh banner.
-const APP_VERSION = '2026.06.07-11';
+const APP_VERSION = '2026.06.07-12';
 let swRegistration = null;
 let updateBannerShown = false;
 
@@ -142,7 +142,34 @@ const load = () => {
   if (!Array.isArray(db.lists)) db.lists = [];
   if (typeof db.tourDone !== 'boolean') db.tourDone = false;
   (db.profiles || []).forEach((pr) => { if (!Array.isArray(pr.habits)) pr.habits = []; });
+
+  // Option 2: one device = one person. Collapse any legacy multi-person local
+  // profiles into a single "me" profile (merging their tasks/entries/habits so
+  // nothing is lost). People to share with now come from linked family accounts.
+  collapseProfiles();
 };
+
+function collapseProfiles() {
+  if (!Array.isArray(db.profiles) || db.profiles.length === 0) {
+    db.profiles = [{ id: 'me', name: 'Me', emoji: '🌼', color: 'sun', tasks: [], entries: [], streak: 0, lastCheck: '', prompt: 0, habits: [] }];
+    activeProfileId = db.profiles[0].id;
+    return;
+  }
+  const primary = db.profiles.find((p) => p.id === activeProfileId) || db.profiles[0];
+  if (db.profiles.length > 1) {
+    db.profiles.forEach((p) => {
+      if (p === primary) return;
+      primary.tasks = (primary.tasks || []).concat(p.tasks || []);
+      primary.entries = (primary.entries || []).concat(p.entries || []);
+      primary.habits = (primary.habits || []).concat(p.habits || []);
+    });
+    primary.entries.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  }
+  // Old assignees referenced local profile ids that no longer exist.
+  (primary.tasks || []).forEach((t) => { if (t.assignee && t.assignee !== primary.id) t.assignee = null; });
+  db.profiles = [primary];
+  activeProfileId = primary.id;
+}
 
 const getProfile = () => db.profiles.find((p) => p.id === activeProfileId) || db.profiles[0];
 
@@ -426,11 +453,6 @@ function buildPickers() {
   });
   $$('#fontPicker button').forEach((b) => b.classList.toggle('on', b.dataset.font === settings.font));
 
-  // Profile colors
-  $('#profileColorPicker').innerHTML = profileColors.map((c) => `<button type="button" data-color="${c.id}" style="background:${c.color}"></button>`).join('');
-
-  // Profile emojis
-  $('#profileEmojiPicker').innerHTML = profileEmojis.map((e) => `<button type="button" data-emoji="${e}">${e}</button>`).join('');
 }
 
 function bumpStreak() {
@@ -448,7 +470,9 @@ function bumpStreak() {
 function buildAssigneePicker() {
   const host = $('#assigneePicker');
   if (!host) return;
-  const opts = [{ id: '', emoji: '🙂', name: 'Anyone' }].concat(db.profiles.map((p) => ({ id: p.id, emoji: p.emoji, name: p.name })));
+  const members = (window.family && window.family.members) ? window.family.members : [];
+  const me = members.find((m) => m.isMe);
+  const opts = [{ id: '', emoji: (me && me.emoji) || '🙂', name: 'Me' }].concat(members.filter((m) => !m.isMe).map((m) => ({ id: m.userId, emoji: m.emoji, name: m.name })));
   host.innerHTML = opts.map((o) => `<button type="button" class="chip ${(assignee || '') === o.id ? 'on' : ''}" data-assignee="${o.id}">${o.emoji} ${esc(o.name)}</button>`).join('');
   $$('#assigneePicker button').forEach((b) => (b.onclick = () => {
     assignee = b.dataset.assignee || null;
@@ -538,6 +562,14 @@ $('#saveTaskBtn').onclick = () => {
   const prof = getProfile();
   const repeatUntil = repeat !== 'none' ? ($('#taskRepeatUntil').value || null) : null;
   const data = { title, due, note: $('#taskNote').value.trim(), priority, repeat, repeatUntil, category, assignee, subtasks: editingSubtasks.map((s) => ({ ...s })), notified: false };
+
+  // Assigning a NEW task to a linked family member sends it to THEIR account
+  // (lands in their "From family" inbox + a push) instead of saving here.
+  if (!editing && assignee && window.family && (window.family.members || []).some((m) => m.userId === assignee && !m.isMe) && typeof assignTaskToMember === 'function') {
+    $('#taskDialog').close();
+    assignTaskToMember(assignee, data);
+    return;
+  }
 
   if (editing) {
     const owner = findTaskOwner(editing);
@@ -653,9 +685,9 @@ function fmt(ms) {
 
 function assigneeBadge(t) {
   if (!t.assignee) return '';
-  const p = profileById(t.assignee);
-  if (!p) return '';
-  return `<span class="assignee-badge">${p.emoji} ${esc(p.name)}</span>`;
+  const m = (window.family && window.family.members) ? window.family.members.find((x) => x.userId === t.assignee) : null;
+  if (!m) return '';
+  return `<span class="assignee-badge">${m.emoji} ${esc(m.name)}</span>`;
 }
 
 function taskHTML(t) {
@@ -1377,75 +1409,11 @@ $('#exportPdfBtn').onclick = async () => {
   }
 };
 
-// PROFILES
-$('#profileBtn').onclick = () => {
-  renderProfileList();
-  $('#profileDialog').showModal();
-};
-
-function renderProfileList() {
-  $('#profileList').innerHTML = db.profiles
-    .map(
-      (p) => `<div class="profile-item ${p.id === activeProfileId ? 'active' : ''}" data-profile="${p.id}">
-    <div class="profile-avatar" style="background:${profileColors.find((c) => c.id === p.color)?.color || '#ffcd57'}">${p.emoji}</div>
-    <div class="profile-info"><b>${esc(p.name)}</b><small>${p.tasks.filter((t) => !t.done).length} tasks · ${p.entries.length} entries</small></div>
-  </div>`
-    )
-    .join('');
-
-  $$('.profile-item').forEach((el) => {
-    el.onclick = () => {
-      activeProfileId = el.dataset.profile;
-      saveActiveProfile();
-      showApp();
-      $('#profileDialog').close();
-      renderAll();
-    };
-  });
-}
-
+// PROFILES / FAMILY
+// Local multi-profile switching has been replaced by linked family accounts.
+// The header profile button now opens the Family dialog (see app3.js).
 let newProfileColor = 'sun';
 let newProfileEmoji = '🌼';
-
-$$('#profileColorPicker button').forEach((b) => {
-  b.onclick = () => {
-    newProfileColor = b.dataset.color;
-    $$('#profileColorPicker button').forEach((x) => x.classList.remove('on'));
-    b.classList.add('on');
-  };
-});
-
-$$('#profileEmojiPicker button').forEach((b) => {
-  b.onclick = () => {
-    newProfileEmoji = b.dataset.emoji;
-    $$('#profileEmojiPicker button').forEach((x) => x.classList.remove('on'));
-    b.classList.add('on');
-  };
-});
-
-$('#addProfileBtn').onclick = () => {
-  const name = $('#newProfileName').value.trim();
-  if (!name) return toast('Name required', 'Please enter a name for this profile.');
-
-  db.profiles.push({
-    id: id(),
-    name,
-    emoji: newProfileEmoji,
-    color: newProfileColor,
-    tasks: [],
-    entries: [],
-    streak: 0,
-    lastCheck: '',
-    prompt: 0,
-    habits: [],
-  });
-  save();
-  $('#newProfileName').value = '';
-  renderProfileList();
-  toast('✨ Profile added!', `${newProfileEmoji} ${name} is ready.`);
-};
-
-$('#closeProfileDialog').onclick = () => $('#profileDialog').close();
 
 // SETTINGS
 $('#settingsBtn').onclick = () => {
@@ -1749,6 +1717,9 @@ async function pullFromCloud() {
         // Last-write-wins for tasks/text, but keep this device's local photos.
         db.profiles = mergeLocalPhotos(data.profiles);
         (db.profiles || []).forEach((pr) => { if (!Array.isArray(pr.habits)) pr.habits = []; });
+        // Option 2: collapse any multi-person profiles pulled from an older
+        // account into this device's single linked-account profile.
+        collapseProfiles();
         save();
         renderAll();
       } else if (data.lists) {
