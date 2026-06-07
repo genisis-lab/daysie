@@ -90,7 +90,7 @@ let renagTimer = null;
 
 // App build version. Must match version.json on the server. Bump both on every
 // deploy so open tabs can detect a new release and show the refresh banner.
-const APP_VERSION = '2026.06.07-2';
+const APP_VERSION = '2026.06.07-3';
 let swRegistration = null;
 let updateBannerShown = false;
 
@@ -935,7 +935,15 @@ function checkReminders() {
 function notify(t) {
   beep();
   toast('⏰ ' + esc(t.title), t.note || 'Reminder time!');
-  if ('Notification' in window && Notification.permission === 'granted') {
+  // Only raise an OS notification when the app is NOT in the foreground.
+  // When the app is open (or was just opened by tapping a push), the in-app
+  // toast above is enough — firing another OS notification would land a
+  // duplicate on top of the background push the server already delivered.
+  if (
+    document.visibilityState !== 'visible' &&
+    'Notification' in window &&
+    Notification.permission === 'granted'
+  ) {
     new Notification('⏰ ' + t.title, {
       body: t.note || 'Reminder time!',
       tag: t.id,
@@ -957,7 +965,11 @@ function startRenag() {
         if (mins % 5 === 0) {
           beep();
           toast('⚠️ Still pending: ' + esc(t.title), `${mins} minutes overdue`);
-          if ('Notification' in window && Notification.permission === 'granted') {
+          if (
+            document.visibilityState !== 'visible' &&
+            'Notification' in window &&
+            Notification.permission === 'granted'
+          ) {
             new Notification('⚠️ Important: ' + t.title, {
               body: `Still pending (${mins} min overdue)`,
               tag: t.id + '-renag',
