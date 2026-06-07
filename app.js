@@ -83,6 +83,10 @@ let repeat = 'none';
 let category = 'none';
 let editing = null;
 let editingEntry = null;
+let editingPhotos = [];
+let editingSubtasks = [];
+let entryTagFilterValue = null;
+let snoozeTaskId = null;
 let timer = null;
 let calendarDate = new Date();
 let taskFilter = 'all';
@@ -90,7 +94,7 @@ let renagTimer = null;
 
 // App build version. Must match version.json on the server. Bump both on every
 // deploy so open tabs can detect a new release and show the refresh banner.
-const APP_VERSION = '2026.06.07-5';
+const APP_VERSION = '2026.06.07-6';
 let swRegistration = null;
 let updateBannerShown = false;
 
@@ -359,6 +363,7 @@ function buildPickers() {
       repeat = b.dataset.repeat;
       $$('#repeatPicker button').forEach((x) => x.classList.remove('on'));
       b.classList.add('on');
+      toggleRepeatUntil();
     };
   });
 
@@ -432,12 +437,54 @@ function openTask(task = null) {
   $('#taskDate').value = day(due);
   $('#taskTime').value = due.toTimeString().slice(0, 5);
 
-  $$('#priorityPicker button').forEach((b) => b.classList.toggle('on', b.dataset.priority === priority));
-  $$('#repeatPicker button').forEach((b) => b.classList.toggle('on', b.dataset.repeat === repeat));
-  $$('#categoryPicker button').forEach((b) => b.classList.toggle('on', b.dataset.category === category));
+  $('#priorityPicker button').forEach((b) => b.classList.toggle('on', b.dataset.priority === priority));
+  $('#repeatPicker button').forEach((b) => b.classList.toggle('on', b.dataset.repeat === repeat));
+  $('#categoryPicker button').forEach((b) => b.classList.toggle('on', b.dataset.category === category));
+
+  // Repeat-until end date
+  const ru = $('#taskRepeatUntil');
+  if (ru) ru.value = task?.repeatUntil || '';
+  toggleRepeatUntil();
+
+  // Subtasks
+  editingSubtasks = task?.subtasks ? task.subtasks.map((s) => ({ ...s })) : [];
+  renderSubtaskEdit();
 
   $('#taskDialog').showModal();
 }
+
+function toggleRepeatUntil() {
+  const wrap = $('#repeatUntilWrap');
+  if (wrap) wrap.classList.toggle('hidden', repeat === 'none');
+}
+
+function renderSubtaskEdit() {
+  const host = $('#subtaskList');
+  if (!host) return;
+  host.innerHTML = editingSubtasks
+    .map((s, i) => `<div class="subtask-edit"><span>${esc(s.text)}</span><button type="button" class="photo-remove" data-rmsub="${i}" aria-label="Remove step">✕</button></div>`)
+    .join('');
+  $$('#subtaskList [data-rmsub]').forEach((b) => (b.onclick = () => {
+    editingSubtasks.splice(+b.dataset.rmsub, 1);
+    renderSubtaskEdit();
+  }));
+}
+
+$('#addSubtaskBtn')?.addEventListener('click', () => {
+  const inp = $('#subtaskInput');
+  const v = (inp.value || '').trim();
+  if (!v) return;
+  editingSubtasks.push({ id: id(), text: v, done: false });
+  inp.value = '';
+  renderSubtaskEdit();
+  inp.focus();
+});
+$('#subtaskInput')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    $('#addSubtaskBtn').click();
+  }
+});
 
 $$('[data-open-task]').forEach((b) => (b.onclick = () => openTask()));
 
@@ -450,7 +497,8 @@ $('#saveTaskBtn').onclick = () => {
   const due = new Date(dateVal + 'T' + timeVal).getTime();
 
   const prof = getProfile();
-  const data = { title, due, note: $('#taskNote').value.trim(), priority, repeat, category, notified: false };
+  const repeatUntil = repeat !== 'none' ? ($('#taskRepeatUntil').value || null) : null;
+  const data = { title, due, note: $('#taskNote').value.trim(), priority, repeat, repeatUntil, category, subtasks: editingSubtasks.map((s) => ({ ...s })), notified: false };
 
   if (editing) {
     Object.assign(
@@ -486,7 +534,11 @@ function completeTask(t) {
     confetti();
     const prof = getProfile();
     if (t.repeat && t.repeat !== 'none' && t.due) {
-      prof.tasks.push({ ...t, id: id(), done: false, completed: null, due: nextDue(t.due, t.repeat), notified: false });
+      const nd = nextDue(t.due, t.repeat);
+      const until = t.repeatUntil ? new Date(t.repeatUntil + 'T23:59:59').getTime() : null;
+      if (!until || nd <= until) {
+        prof.tasks.push({ ...t, id: id(), done: false, completed: null, due: nd, notified: false });
+      }
     }
   }
   save();
@@ -514,8 +566,40 @@ function snooze(t, min = 10) {
   t.notified = false;
   save();
   renderAll();
-  toast('😴 Snoozed', `Back in ${min} minutes.`);
+  const label = min >= 60 && min % 60 === 0 ? `${min / 60} hour${min === 60 ? '' : 's'}` : `${min} minutes`;
+  toast('😴 Snoozed', `Back in ${label}.`);
 }
+
+function snoozeUntilTomorrow(t) {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(9, 0, 0, 0);
+  t.due = d.getTime();
+  t.notified = false;
+  save();
+  renderAll();
+  toast('🌅 Snoozed to tomorrow', 'Reminder set for 9:00 AM.');
+}
+
+function openSnooze(t) {
+  if (!t) return;
+  snoozeTaskId = t.id;
+  $('#snoozeDialog').showModal();
+}
+
+$$('#snoozeDialog [data-snooze-min]').forEach((b) => (b.onclick = () => {
+  const prof = getProfile();
+  const t = prof.tasks.find((x) => x.id === snoozeTaskId);
+  $('#snoozeDialog').close();
+  if (t) snooze(t, +b.dataset.snoozeMin);
+}));
+$('#snoozeDialog [data-snooze-tomorrow]')?.addEventListener('click', () => {
+  const prof = getProfile();
+  const t = prof.tasks.find((x) => x.id === snoozeTaskId);
+  $('#snoozeDialog').close();
+  if (t) snoozeUntilTomorrow(t);
+});
+$('#closeSnoozeTop')?.addEventListener('click', () => $('#snoozeDialog').close());
 
 function fmt(ms) {
   const d = new Date(ms);
@@ -537,10 +621,12 @@ function taskHTML(t) {
       <div class="task-title"><span class="task-category">${cat.emoji}</span>${esc(t.title)}</div>
       <div class="meta">
         ${t.due ? `<span class="${late ? 'late' : ''}">${late ? '⚠️ ' : '🕒 '}${fmt(t.due)}</span>` : ''}
-        ${t.repeat && t.repeat !== 'none' ? `<span>🔁 ${t.repeat}</span>` : ''}
+        ${t.repeat && t.repeat !== 'none' ? `<span>🔁 ${t.repeat}${t.repeatUntil ? ' · until ' + new Date(t.repeatUntil + 'T00:00:00').toLocaleDateString([], { month: 'short', day: 'numeric' }) : ''}</span>` : ''}
         ${t.priority === 'high' ? '<span>🌸 Important</span>' : ''}
+        ${t.subtasks && t.subtasks.length ? `<span>☑️ ${t.subtasks.filter((s) => s.done).length}/${t.subtasks.length}</span>` : ''}
       </div>
       ${t.note ? `<div class="note">${esc(t.note)}</div>` : ''}
+      ${t.subtasks && t.subtasks.length ? `<div class="subtasks">${t.subtasks.map((s) => `<button type="button" class="subtask ${s.done ? 'done' : ''}" data-subtask="${s.id}" data-parent="${t.id}"><span class="subcheck">${s.done ? '✓' : ''}</span><span class="subtext">${esc(s.text)}</span></button>`).join('')}</div>` : ''}
     </div>
     <div class="actions">
       ${late && !t.done ? `<button class="icon" data-snooze="${t.id}">😴</button>` : ''}
@@ -601,7 +687,15 @@ function bindTaskButtons() {
   $$('[data-done]').forEach((b) => (b.onclick = () => completeTask(prof.tasks.find((t) => t.id === b.dataset.done))));
   $$('[data-delete]').forEach((b) => (b.onclick = () => delTask(b.dataset.delete)));
   $$('[data-edit]').forEach((b) => (b.onclick = () => openTask(prof.tasks.find((t) => t.id === b.dataset.edit))));
-  $$('[data-snooze]').forEach((b) => (b.onclick = () => snooze(prof.tasks.find((t) => t.id === b.dataset.snooze))));
+  $$('[data-snooze]').forEach((b) => (b.onclick = () => openSnooze(prof.tasks.find((t) => t.id === b.dataset.snooze))));
+  $$('[data-subtask]').forEach((b) => (b.onclick = () => {
+    const t = prof.tasks.find((x) => x.id === b.dataset.parent);
+    const s = t && t.subtasks ? t.subtasks.find((x) => x.id === b.dataset.subtask) : null;
+    if (!s) return;
+    s.done = !s.done;
+    save();
+    renderAll();
+  }));
 }
 
 // Task filter
@@ -671,6 +765,7 @@ function renderOnThisDay() {
         <div><b>${d.getFullYear()}</b><br><small>${m ? m[2] : ''}</small></div>
       </div>
       ${e.text ? `<p class="entry-text">${esc(e.text)}</p>` : ''}
+      ${e.photos && e.photos.length ? `<div class="entry-photos">${e.photos.map((p, i) => `<img src="${p}" class="entry-photo" tabindex="0" alt="Memory photo ${i + 1}" />`).join('')}</div>` : ''}
     </article>`;
     })
     .join('');
@@ -700,7 +795,9 @@ function renderCalendar() {
     const dateStr = day(date);
     const isToday = dateStr === day();
     const hasTasks = prof.tasks.some((t) => t.due && day(new Date(t.due)) === dateStr);
-    html += `<div class="cal-day ${isToday ? 'today' : ''} ${hasTasks ? 'has-tasks' : ''}" data-date="${dateStr}">${d}</div>`;
+    const dayPhoto = prof.entries.find((e) => day(new Date(e.ts)) === dateStr && e.photos && e.photos.length);
+    const thumb = dayPhoto ? `<img class="cal-thumb" src="${dayPhoto.photos[0]}" alt="" />` : '';
+    html += `<div class="cal-day ${isToday ? 'today' : ''} ${hasTasks ? 'has-tasks' : ''} ${thumb ? 'has-photo' : ''}" data-date="${dateStr}">${thumb}<span class="cal-num">${d}</span></div>`;
   }
 
   // Next month days
@@ -716,12 +813,19 @@ function renderCalendar() {
     el.onclick = () => {
       const dateStr = el.dataset.date;
       const tasks = prof.tasks.filter((t) => t.due && day(new Date(t.due)) === dateStr);
-      if (tasks.length === 0) {
+      const dayEntries = prof.entries.filter((e) => day(new Date(e.ts)) === dateStr && e.photos && e.photos.length);
+      if (tasks.length === 0 && dayEntries.length === 0) {
         $('#calDayDetail').classList.add('hidden');
         return;
       }
+      let detail = `<h3>${new Date(dateStr).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}</h3>`;
+      detail += tasks.length ? tasks.map(taskHTML).join('') : '<p style="color:var(--soft);font-weight:700">No reminders this day.</p>';
+      if (dayEntries.length) {
+        const photos = dayEntries.flatMap((e) => e.photos);
+        detail += `<div class="cal-photos-head">📷 Memories</div><div class="entry-photos">${photos.map((p, i) => `<img src="${p}" class="entry-photo" tabindex="0" alt="Memory ${i + 1}" />`).join('')}</div>`;
+      }
       $('#calDayDetail').classList.remove('hidden');
-      $('#calDayDetail').innerHTML = `<h3>${new Date(dateStr).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}</h3>${tasks.map(taskHTML).join('')}`;
+      $('#calDayDetail').innerHTML = detail;
       bindTaskButtons();
     };
   });
@@ -793,7 +897,25 @@ $('#searchEntries').oninput = renderEntries;
 function renderEntries() {
   const prof = getProfile();
   const q = $('#searchEntries').value.toLowerCase();
-  const list = prof.entries.filter((e) => (e.text || '').toLowerCase().includes(q) || (e.tags || []).join(' ').toLowerCase().includes(q));
+
+  // Tag filter chips (built from tags actually used in entries)
+  const usedTags = [...new Set(prof.entries.flatMap((e) => e.tags || []))];
+  const tagHost = $('#entryTagFilter');
+  if (tagHost) {
+    tagHost.innerHTML = usedTags.length
+      ? usedTags.map((t) => `<button class="chip-filter ${entryTagFilterValue === t ? 'active' : ''}" data-etag="${esc(t)}">${esc(t)}</button>`).join('')
+      : '';
+    $$('#entryTagFilter [data-etag]').forEach((b) => (b.onclick = () => {
+      entryTagFilterValue = entryTagFilterValue === b.dataset.etag ? null : b.dataset.etag;
+      renderEntries();
+    }));
+  }
+
+  const list = prof.entries.filter((e) => {
+    const matchesText = (e.text || '').toLowerCase().includes(q) || (e.tags || []).join(' ').toLowerCase().includes(q);
+    const matchesTag = !entryTagFilterValue || (e.tags || []).includes(entryTagFilterValue);
+    return matchesText && matchesTag;
+  });
 
   $('#entries').innerHTML = list.length
     ? list
@@ -839,6 +961,8 @@ function renderEntries() {
       editingEntry = e.id;
       selectedMood = e.mood || null;
       $('#editEntryText').value = e.text || '';
+      editingPhotos = [...(e.photos || [])];
+      renderEditPhotos();
       $$('#editMoodPicker button').forEach((btn) => btn.classList.toggle('on', +btn.dataset.mood === selectedMood));
       $('#editEntryDialog').showModal();
     };
@@ -878,22 +1002,50 @@ function lightboxStep(dir) {
   renderLightbox();
 }
 
-// Tap any journal photo to open it full-screen (event delegation survives re-renders)
-$('#entries').addEventListener('click', (ev) => {
-  const img = ev.target.closest('.entry-photo');
+// Tap any journal photo (journal list, on-this-day, calendar) to open full-screen.
+// Delegated on document so it survives re-renders and works across all views.
+document.addEventListener('click', (ev) => {
+  const img = ev.target.closest && ev.target.closest('.entry-photo');
   if (!img) return;
-  const imgs = [...img.closest('.entry-photos').querySelectorAll('img')];
+  const group = img.closest('.entry-photos');
+  if (!group) return;
+  const imgs = [...group.querySelectorAll('img')];
   openLightbox(imgs.map((n) => n.src), imgs.indexOf(img));
 });
-$('#entries').addEventListener('keydown', (ev) => {
+document.addEventListener('keydown', (ev) => {
   if (ev.key !== 'Enter' && ev.key !== ' ') return;
-  const img = ev.target.closest('.entry-photo');
+  const img = ev.target.closest && ev.target.closest('.entry-photo');
   if (!img) return;
+  const group = img.closest('.entry-photos');
+  if (!group) return;
   ev.preventDefault();
-  const imgs = [...img.closest('.entry-photos').querySelectorAll('img')];
+  const imgs = [...group.querySelectorAll('img')];
   openLightbox(imgs.map((n) => n.src), imgs.indexOf(img));
 });
 
+async function shareLightboxPhoto() {
+  const src = lightboxItems[lightboxIndex];
+  if (!src) return;
+  try {
+    const blob = await (await fetch(src)).blob();
+    const ext = (blob.type && blob.type.split('/')[1]) || 'png';
+    const file = new File([blob], `daysie-photo-${Date.now()}.${ext}`, { type: blob.type || 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'Daysie photo' });
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = file.name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    toast('⬇️ Photo saved', '');
+  } catch (e) {
+    toast('❌ Could not share photo', 'Please try again.');
+  }
+}
+
+$('#lightboxShare')?.addEventListener('click', (e) => { e.stopPropagation(); shareLightboxPhoto(); });
 $('#lightboxClose').onclick = closeLightbox;
 $('#lightboxPrev').onclick = (e) => { e.stopPropagation(); lightboxStep(-1); };
 $('#lightboxNext').onclick = (e) => { e.stopPropagation(); lightboxStep(1); };
@@ -913,12 +1065,25 @@ $('#lightbox').addEventListener('touchend', (e) => {
   lbTouchX = null;
 });
 
+function renderEditPhotos() {
+  const host = $('#editPhotos');
+  if (!host) return;
+  host.innerHTML = editingPhotos
+    .map((p, i) => `<div class="edit-photo-wrap"><img src="${p}" alt="Photo ${i + 1}" /><button type="button" class="photo-remove" data-rmphoto="${i}" aria-label="Remove photo">✕</button></div>`)
+    .join('');
+  $$('#editPhotos [data-rmphoto]').forEach((b) => (b.onclick = () => {
+    editingPhotos.splice(+b.dataset.rmphoto, 1);
+    renderEditPhotos();
+  }));
+}
+
 $('#saveEditEntry').onclick = () => {
   const prof = getProfile();
   const e = prof.entries.find((x) => x.id === editingEntry);
   if (!e) return;
   e.text = $('#editEntryText').value.trim();
   e.mood = selectedMood;
+  e.photos = [...editingPhotos];
   save();
   $('#editEntryDialog').close();
   renderEntries();
@@ -928,6 +1093,30 @@ $('#saveEditEntry').onclick = () => {
 $('#cancelEditEntry').onclick = () => $('#editEntryDialog').close();
 
 // INSIGHTS
+function renderMoodTrend() {
+  const host = $('#moodTrend');
+  if (!host) return;
+  const prof = getProfile();
+  const days = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    days.push(d);
+  }
+  const moodColors = { 1: '#ff8c9a', 2: '#ffa279', 3: '#ffcd57', 4: '#9bd385', 5: '#7fc989' };
+  host.innerHTML = days
+    .map((d) => {
+      const es = prof.entries.filter((e) => day(new Date(e.ts)) === day(d) && e.mood);
+      const avg = es.length ? es.reduce((a, e) => a + e.mood, 0) / es.length : 0;
+      const c = avg ? moodColors[Math.round(avg)] : 'var(--line)';
+      const h = avg ? (avg / 5) * 100 : 8;
+      const lbl = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      const tick = d.getDate() === 1 || d.getDate() % 7 === 0 ? d.getDate() : '';
+      return `<div class="trend-col" title="${lbl}${avg ? ' · ' + avg.toFixed(1) : ''}"><i style="height:${h}%;background:${c}"></i><small>${tick}</small></div>`;
+    })
+    .join('');
+}
+
 function renderInsights() {
   const prof = getProfile();
   const done = prof.tasks.filter((t) => t.done).length;
@@ -956,6 +1145,8 @@ function renderInsights() {
       return `<div class="bar"><span>${m ? m[1] : '·'}</span><i style="height:${avg ? (avg / 5) * 100 : 4}%"></i><small>${d.toLocaleDateString([], { weekday: 'short' }).slice(0, 1)}</small></div>`;
     })
     .join('');
+
+  renderMoodTrend();
 
   const badges = [
     ['🌱', 'First step', 'Add your first reminder', prof.tasks.length >= 1],
@@ -1097,14 +1288,15 @@ $('#exportPdfBtn').onclick = async () => {
   toast('📄 Generating PDF...', 'This may take a moment.');
   try {
     const prof = getProfile();
-    let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Daysie Journal</title><style>body{font-family:sans-serif;margin:40px;line-height:1.6}h1{color:#f3ad32}h2{margin-top:30px;border-bottom:2px solid #efe3d7;padding-bottom:5px}.entry{margin:20px 0;padding:15px;border-left:4px solid #ad97e8;background:#fff7ed}.meta{color:#716c80;font-size:0.9em;margin-bottom:10px}</style></head><body>`;
+    let html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Daysie Journal</title><style>body{font-family:sans-serif;margin:40px;line-height:1.6}h1{color:#f3ad32}h2{margin-top:30px;border-bottom:2px solid #efe3d7;padding-bottom:5px}.entry{margin:20px 0;padding:15px;border-left:4px solid #ad97e8;background:#fff7ed}.meta{color:#716c80;font-size:0.9em;margin-bottom:10px}.photos{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.photos img{max-width:220px;max-height:220px;border-radius:8px;border:1px solid #efe3d7}</style></head><body>`;
     html += `<h1>🌼 Daysie Journal - ${prof.name}</h1>`;
     html += `<p><strong>Exported:</strong> ${new Date().toLocaleDateString()}</p>`;
     html += `<h2>📖 Journal Entries (${prof.entries.length})</h2>`;
     prof.entries.slice(0, 100).forEach((e) => {
       const d = new Date(e.ts);
       const m = moods.find((x) => +x[0] === e.mood);
-      html += `<div class="entry"><div class="meta">${d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} at ${d.toLocaleTimeString()} ${m ? '· ' + m[1] + ' ' + m[2] : ''}</div>${e.text ? `<p>${esc(e.text)}</p>` : ''}</div>`;
+      const photoHtml = e.photos && e.photos.length ? `<div class="photos">${e.photos.map((p) => `<img src="${p}" />`).join('')}</div>` : '';
+      html += `<div class="entry"><div class="meta">${d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} at ${d.toLocaleTimeString()} ${m ? '· ' + m[1] + ' ' + m[2] : ''}</div>${e.text ? `<p>${esc(e.text)}</p>` : ''}${photoHtml}</div>`;
     });
     html += `</body></html>`;
 
