@@ -134,8 +134,28 @@ For a family app, you'll stay well within free tier limits! 🌼
 
 ### Push notifications not working
 - Ensure VAPID keys are set correctly
+- The Worker sends Web Push using the built-in WebCrypto API (no `web-push` package needed). For background push to work you MUST set the `VAPID_PRIVATE_KEY` secret and redeploy the Worker (`npx wrangler deploy`).
+- Background push only fires for tasks with a due date/time. On iPhone, the user must add Daysie to the Home Screen and open it from there (iOS 16.4+).
+- Check Worker logs for `Push send error` (`wrangler tail`).
 - Check browser console for errors
 - Verify Service Worker is registered (DevTools > Application > Service Workers)
+
+## Shipping an update (so users load the new app)
+
+The app shows a "new version is ready" refresh banner when the deployed version
+differs from what a user has open. For that to trigger, bump the version on every
+meaningful front-end deploy:
+
+1. Edit `version.json` and change `"version"` (e.g. `2026.06.07-2`).
+2. Set the matching `APP_VERSION` constant near the top of `app.js` to the same value.
+3. Commit/push to GitHub — Cloudflare Pages auto-deploys.
+
+The service worker is network-first for the app files, so a normal reload always
+loads the freshest HTML/JS/CSS when online. Users no longer need to clear site
+data to update, so the saved name/profile is preserved across updates.
+
+If you changed `worker.js` or `schema.sql`, also redeploy the Worker:
+`npx wrangler deploy` (and run any schema migration first).
 
 ### Data not syncing
 - Check that sync is on (Settings should show "Sync is on")

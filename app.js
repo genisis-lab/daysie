@@ -88,6 +88,12 @@ let calendarDate = new Date();
 let taskFilter = 'all';
 let renagTimer = null;
 
+// App build version. Must match version.json on the server. Bump both on every
+// deploy so open tabs can detect a new release and show the refresh banner.
+const APP_VERSION = '2026.06.07-1';
+let swRegistration = null;
+let updateBannerShown = false;
+
 // Utility functions
 const save = () => {
   localStorage.setItem(KEY, JSON.stringify(db));
@@ -179,11 +185,77 @@ function boot() {
   if (db.onboarded) showApp();
   else $('#welcome').classList.remove('hidden');
 
-  // Register service worker
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
-  }
+  setupServiceWorker();
 }
+
+// ---- App updates: service worker + version banner -------------------------
+function setupServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+
+  // When a new worker takes control, reload once so the fresh files load.
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloading) return;
+    reloading = true;
+    window.location.reload();
+  });
+
+  navigator.serviceWorker
+    .register('./sw.js')
+    .then((reg) => {
+      swRegistration = reg;
+      // A worker is already waiting (update downloaded in a previous visit).
+      if (reg.waiting && navigator.serviceWorker.controller) showUpdateBanner();
+      // A new worker started installing during this visit.
+      reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', () => {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) showUpdateBanner();
+        });
+      });
+      // Periodically ask the browser to re-check for a new service worker.
+      setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
+    })
+    .catch(() => {});
+
+  // Also poll a tiny version file so content-only deploys are detected even
+  // when the service worker file itself didn't change.
+  checkVersion();
+  setInterval(checkVersion, 30 * 60 * 1000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) checkVersion();
+  });
+}
+
+async function checkVersion() {
+  try {
+    const res = await fetch('./version.json?ts=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data && data.version && data.version !== APP_VERSION) showUpdateBanner();
+  } catch (e) {}
+}
+
+function showUpdateBanner() {
+  if (updateBannerShown) return;
+  updateBannerShown = true;
+  $('#updateBanner')?.classList.remove('hidden');
+}
+
+$('#updateReloadBtn')?.addEventListener('click', () => {
+  // If a new worker is waiting, activate it; controllerchange then reloads.
+  if (swRegistration && swRegistration.waiting) {
+    swRegistration.waiting.postMessage({ type: 'SKIP_WAITING' });
+    setTimeout(() => window.location.reload(), 1500); // fallback if no controllerchange
+  } else {
+    window.location.reload();
+  }
+});
+
+$('#updateDismissBtn')?.addEventListener('click', () => {
+  $('#updateBanner')?.classList.add('hidden');
+});
 
 function showApp() {
   $('#welcome').classList.add('hidden');
@@ -642,9 +714,9 @@ function renderCalendar() {
 
   // Next month days
   const totalCells = Math.ceil((firstDay + daysInMonth) / 7) * 7;
-  let nextDayNum = 1;
+  let nextDay = 1;
   for (let i = firstDay + daysInMonth; i < totalCells; i++) {
-    html += `<div class="cal-day other-month">${nextDayNum++}</div>`;
+    html += `<div class="cal-day other-month">${nextDay++}</div>`;
   }
 
   $('#calGrid').innerHTML = html;
@@ -991,408 +1063,3 @@ function renderProfileList() {
     <div class="profile-info"><b>${esc(p.name)}</b><small>${p.tasks.filter((t) => !t.done).length} tasks · ${p.entries.length} entries</small></div>
   </div>`
     )
-    .join('');
-
-  $$('.profile-item').forEach((el) => {
-    el.onclick = () => {
-      activeProfileId = el.dataset.profile;
-      saveActiveProfile();
-      showApp();
-      $('#profileDialog').close();
-      renderAll();
-    };
-  });
-}
-
-let newProfileColor = 'sun';
-let newProfileEmoji = '🌼';
-
-$$('#profileColorPicker button').forEach((b) => {
-  b.onclick = () => {
-    newProfileColor = b.dataset.color;
-    $$('#profileColorPicker button').forEach((x) => x.classList.remove('on'));
-    b.classList.add('on');
-  };
-});
-
-$$('#profileEmojiPicker button').forEach((b) => {
-  b.onclick = () => {
-    newProfileEmoji = b.dataset.emoji;
-    $$('#profileEmojiPicker button').forEach((x) => x.classList.remove('on'));
-    b.classList.add('on');
-  };
-});
-
-$('#addProfileBtn').onclick = () => {
-  const name = $('#newProfileName').value.trim();
-  if (!name) return toast('Name required', 'Please enter a name for this profile.');
-
-  db.profiles.push({
-    id: id(),
-    name,
-    emoji: newProfileEmoji,
-    color: newProfileColor,
-    tasks: [],
-    entries: [],
-    streak: 0,
-    lastCheck: '',
-    prompt: 0,
-  });
-  save();
-  $('#newProfileName').value = '';
-  renderProfileList();
-  toast('✨ Profile added!', `${newProfileEmoji} ${name} is ready.`);
-};
-
-$('#closeProfileDialog').onclick = () => $('#profileDialog').close();
-
-// SETTINGS
-$('#settingsBtn').onclick = () => {
-  updateAccountUI();
-  $('#settingsDialog').showModal();
-};
-
-$('#closeSettings').onclick = () => $('#settingsDialog').close();
-$('#closeSettingsTop').onclick = () => $('#settingsDialog').close();
-
-// SYNC & AUTH (device pairing — no email)
-const API = 'https://daysie-api.neil27.workers.dev';
-let pairPoll = null; // source device: polling for a pending request
-let statusPoll = null; // new device: polling for approval
-
-function stopPairPolling() { if (pairPoll) { clearInterval(pairPoll); pairPoll = null; } }
-function stopStatusPolling() { if (statusPoll) { clearInterval(statusPoll); statusPoll = null; } }
-
-function updateSyncStatus() {
-  if (settings.authToken) {
-    $('#syncStatus').classList.remove('hidden');
-    $('#syncStatus').textContent = '☁️ Synced';
-  } else {
-    $('#syncStatus').classList.add('hidden');
-  }
-}
-
-function updateAccountUI() {
-  if (settings.authToken) {
-    $('#loggedOutSection').classList.add('hidden');
-    $('#loggedInSection').classList.remove('hidden');
-  } else {
-    $('#loggedOutSection').classList.remove('hidden');
-    $('#loggedInSection').classList.add('hidden');
-    $('#enterCodeSection')?.classList.add('hidden');
-    $('#linkCodeSection')?.classList.add('hidden');
-  }
-}
-
-// Turn on sync: create a fresh account on this device (becomes the owner)
-$('#enableSyncBtn').onclick = async () => {
-  toast('☁️ Turning on sync...', '');
-  try {
-    const res = await fetch(`${API}/account/create`, { method: 'POST' });
-    if (!res.ok) throw new Error('create failed');
-    const data = await res.json();
-    settings.authToken = data.token;
-    settings.userId = data.userId;
-    saveSettings();
-    updateAccountUI();
-    updateSyncStatus();
-    toast('🎉 Sync is on!', 'Now link your other devices with a code.');
-    syncToCloud();
-  } catch (e) {
-    console.error(e);
-    toast('❌ Could not turn on sync', 'Check your connection and try again.');
-  }
-};
-
-// New device: reveal the "enter code" box
-$('#haveCodeBtn').onclick = () => {
-  $('#enterCodeSection').classList.toggle('hidden');
-  $('#pairCodeInput')?.focus();
-};
-
-// New device: submit a pairing code, then wait for the source device to approve
-$('#redeemCodeBtn').onclick = async () => {
-  const code = ($('#pairCodeInput').value || '').trim().toUpperCase().replace(/\s/g, '');
-  if (code.length < 6) return toast('Invalid code', 'Enter the code shown on your other device.');
-  const status = $('#redeemStatus');
-  status.classList.remove('hidden');
-  status.textContent = '⏳ Waiting for the other device to approve…';
-  try {
-    const res = await fetch(`${API}/pair/redeem`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code }),
-    });
-    if (res.status === 429) { status.textContent = '⛔ Too many attempts. Wait a minute and try again.'; return; }
-    if (!res.ok) { status.textContent = '❌ That code didn’t work. Double-check it and try again.'; return; }
-
-    const started = Date.now();
-    stopStatusPolling();
-    statusPoll = setInterval(async () => {
-      if (Date.now() - started > 3 * 60 * 1000) { stopStatusPolling(); status.textContent = '⌛ Code expired. Ask for a fresh one.'; return; }
-      try {
-        const r = await fetch(`${API}/pair/status`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code }),
-        });
-        const d = await r.json();
-        if (d.status === 'approved') {
-          stopStatusPolling();
-          settings.authToken = d.token;
-          settings.userId = d.userId;
-          saveSettings();
-          updateAccountUI();
-          updateSyncStatus();
-          status.textContent = '';
-          toast('🎉 Connected!', 'This device is now synced.');
-          await pullFromCloud();
-        } else if (d.status === 'expired') {
-          stopStatusPolling();
-          status.textContent = '⌛ Code expired. Ask for a fresh one.';
-        } else if (d.status === 'gone') {
-          stopStatusPolling();
-          status.textContent = '🚫 Request denied or the code is no longer valid.';
-        }
-      } catch (e) { /* keep polling */ }
-    }, 3000);
-  } catch (e) {
-    console.error(e);
-    status.textContent = '❌ Network error. Try again.';
-  }
-};
-
-// Source device: create a code, then watch for a device asking to connect
-$('#linkDeviceBtn').onclick = async () => {
-  try {
-    const res = await fetch(`${API}/pair/create`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${settings.authToken}` },
-    });
-    if (!res.ok) return toast('❌ Could not create a code', 'Try again.');
-    const data = await res.json();
-    $('#linkCodeDisplay').textContent = data.code;
-    const mins = Math.max(1, Math.round((data.expires - Date.now()) / 60000));
-    $('#linkCodeExpiry').textContent = `Code expires in about ${mins} min`;
-    $('#linkCodeSection').classList.remove('hidden');
-
-    const started = Date.now();
-    stopPairPolling();
-    pairPoll = setInterval(async () => {
-      if (Date.now() - started > 3 * 60 * 1000) { stopPairPolling(); $('#linkCodeSection').classList.add('hidden'); return; }
-      try {
-        const r = await fetch(`${API}/pair/pending`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${settings.authToken}` },
-        });
-        const d = await r.json();
-        if (d.pending && d.code) {
-          stopPairPolling();
-          confirm(
-            '🔗',
-            'New device wants to connect',
-            'Someone just entered your code on another device. Approve only if it’s you or someone you trust.',
-            async () => {
-              await fetch(`${API}/pair/approve`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.authToken}` },
-                body: JSON.stringify({ code: d.code }),
-              });
-              $('#linkCodeSection').classList.add('hidden');
-              toast('✅ Device approved!', 'Your other device is now syncing.');
-            },
-            async () => {
-              await fetch(`${API}/pair/deny`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.authToken}` },
-                body: JSON.stringify({ code: d.code }),
-              });
-              $('#linkCodeSection').classList.add('hidden');
-              toast('🚫 Request denied', '');
-            }
-          );
-        }
-      } catch (e) { /* keep polling */ }
-    }, 3000);
-  } catch (e) {
-    console.error(e);
-    toast('❌ Network error', 'Try again.');
-  }
-};
-
-$('#signOutBtn').onclick = () => {
-  confirm(
-    '☁️',
-    'Turn off sync on this device?',
-    'Your data stays on this device. Other linked devices keep syncing.',
-    () => {
-      stopPairPolling();
-      stopStatusPolling();
-      settings.authToken = null;
-      settings.userId = null;
-      settings.pushSubscription = null;
-      saveSettings();
-      updateAccountUI();
-      updateSyncStatus();
-      toast('👋 Sync turned off', '');
-    },
-    () => {}
-  );
-};
-
-$('#syncNowBtn').onclick = async () => {
-  toast('🔄 Syncing...', '');
-  await syncToCloud();
-  await pullFromCloud();
-  toast('✅ Synced!', '');
-};
-
-// Stop any pairing polls when the settings dialog is closed
-$('#settingsDialog')?.addEventListener('close', () => { stopPairPolling(); stopStatusPolling(); });
-
-async function syncToCloud() {
-  if (!settings.authToken) return;
-  try {
-    await fetch('https://daysie-api.neil27.workers.dev/data', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.authToken}` },
-      body: JSON.stringify({ profiles: db.profiles }),
-    });
-  } catch (e) {
-    console.error('Sync error:', e);
-  }
-}
-
-async function pullFromCloud() {
-  if (!settings.authToken) return;
-  try {
-    const res = await fetch('https://daysie-api.neil27.workers.dev/data', {
-      headers: { Authorization: `Bearer ${settings.authToken}` },
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.profiles && data.profiles.length > 0) {
-        // Merge (simple last-write-wins for now)
-        db.profiles = data.profiles;
-        save();
-        renderAll();
-      }
-    }
-  } catch (e) {
-    console.error('Pull error:', e);
-  }
-}
-
-// PUSH NOTIFICATIONS
-$('#subscribePushBtn').onclick = async () => {
-  if (!settings.authToken) {
-    toast('🔑 Turn on sync first', 'Tap "Turn on sync" under "Sync & account" above, then enable push.');
-    $('#enableSyncBtn')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    $('#enableSyncBtn')?.focus();
-    return;
-  }
-  if (isIOS() && !isStandalone()) {
-    return toast('📲 Add Daysie to your Home Screen', 'On iPhone, push only works after you add Daysie to your Home Screen (Share, then Add to Home Screen) and open it from there.');
-  }
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return toast('Not supported', 'Your browser does not support push notifications.');
-
-  try {
-    const registration = await navigator.serviceWorker.ready;
-    const subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array('BCbfGHSDEXclbsTnL3DjwZxyaLTXhlge4D6wNonqGwOfkLgA19fFyfz7j0nmBD0GxQJp4MNDPfWigOzFvLCyinU'),
-    });
-
-    // Send subscription to Worker
-    const res = await fetch('https://daysie-api.neil27.workers.dev/push/subscribe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.authToken}` },
-      body: JSON.stringify(subscription),
-    });
-
-    if (res.ok) {
-      settings.pushSubscription = subscription;
-      saveSettings();
-      toast('🔔 Push enabled!', 'You\'ll get reminders even when Daysie is closed.');
-    } else {
-      toast('❌ Failed', 'Could not register push subscription.');
-    }
-  } catch (e) {
-    console.error(e);
-    toast('❌ Error', 'Could not subscribe to push.');
-  }
-};
-
-function urlBase64ToUint8Array(base64String) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const rawData = window.atob(base64);
-  return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)));
-}
-
-// CONFIRM DIALOG
-let confirmCallback = null;
-let cancelCallback = null;
-
-function confirm(icon, title, msg, onYes, onNo) {
-  $('#confirmIcon').textContent = icon;
-  $('#confirmTitle').textContent = title;
-  $('#confirmMsg').textContent = msg;
-  confirmCallback = onYes;
-  cancelCallback = onNo;
-  $('#confirmDialog').showModal();
-}
-
-$('#confirmYes').onclick = () => {
-  $('#confirmDialog').close();
-  if (confirmCallback) confirmCallback();
-};
-
-$('#confirmNo').onclick = () => {
-  $('#confirmDialog').close();
-  if (cancelCallback) cancelCallback();
-};
-
-// THREE.JS BACKGROUND
-function three() {
-  if (!window.THREE) return;
-  const c = $('#garden');
-  const r = new THREE.WebGLRenderer({ canvas: c, alpha: true, antialias: true });
-  r.setPixelRatio(Math.min(devicePixelRatio, 2));
-  let scene = new THREE.Scene();
-  let cam = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 100);
-  cam.position.z = 18;
-  let g = new THREE.Group();
-  scene.add(g);
-  let colors = [0xffcd57, 0xff8c9a, 0x7fc989, 0x79c8ce, 0xad97e8, 0xffffff];
-  for (let i = 0; i < 34; i++) {
-    let mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(Math.random() * 0.55 + 0.18, 16, 16),
-      new THREE.MeshBasicMaterial({ color: colors[i % colors.length], transparent: true, opacity: 0.45 })
-    );
-    mesh.position.set((Math.random() - 0.5) * 34, (Math.random() - 0.5) * 26, (Math.random() - 0.5) * 10);
-    mesh.userData = { x: mesh.position.x, y: mesh.position.y, s: Math.random() * 0.5 + 0.2, p: Math.random() * 9 };
-    g.add(mesh);
-  }
-  function resize() {
-    r.setSize(innerWidth, innerHeight);
-    cam.aspect = innerWidth / innerHeight;
-    cam.updateProjectionMatrix();
-  }
-  addEventListener('resize', resize);
-  resize();
-  let t = 0;
-  (function loop() {
-    t += 0.01;
-    g.children.forEach((m) => {
-      m.position.x = m.userData.x + Math.sin(t * m.userData.s + m.userData.p) * 1.2;
-      m.position.y = m.userData.y + Math.cos(t * m.userData.s + m.userData.p) * 1.1;
-    });
-    g.rotation.y = Math.sin(t * 0.25) * 0.08;
-    r.render(scene, cam);
-    requestAnimationFrame(loop);
-  })();
-}
-
-setTimeout(three, 500);
-boot();
