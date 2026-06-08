@@ -1455,11 +1455,11 @@ body[data-theme="dark"] .modal-close {
   }
 
   .tabs {
-    width: calc(100% - 16px);
+    width: calc(100% - 10px);
     bottom: 8px;
     gap: 2px;
-    padding: 6px;
-    padding-bottom: max(6px, env(safe-area-inset-bottom));
+    padding: 11px 9px;
+    padding-bottom: max(11px, env(safe-area-inset-bottom));
   }
 
   .tabs button {
@@ -1467,14 +1467,13 @@ body[data-theme="dark"] .modal-close {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 3px;
+    gap: 4px;
     line-height: 1;
-    padding: 6px 1px;
+    padding: 9px 1px;
     min-width: 0;
   }
 
   .tabs button span {
-    font-size: 0.62rem;
     line-height: 1;
     max-width: 100%;
     overflow: hidden;
@@ -1520,10 +1519,6 @@ body[data-theme="dark"] .modal-close {
 
   .hero-card b {
     font-size: 2.6rem;
-  }
-
-  .tabs button span {
-    font-size: 0.6rem;
   }
 }
 
