@@ -11,6 +11,24 @@ window.familyLists = [];
 let famNewEmoji = '🌼';
 let famNewColor = 'sun';
 
+// Tracks which family member IDs we've already seen, so we can announce when a
+// NEW person joins (toast + OS notification) and auto-refresh the roster.
+let famSeen = null;
+function notifyNewMembers(members) {
+  members = members || [];
+  const ids = new Set(members.map((m) => m.userId));
+  if (famSeen === null) { famSeen = ids; return; }
+  members.forEach((m) => {
+    if (m.isMe || famSeen.has(m.userId)) return;
+    const who = m.name || 'Someone';
+    if (typeof toast === 'function') toast('🎉 ' + who + ' joined your family!', 'You can now share lists and assign each other reminders.');
+    if (document.visibilityState !== 'visible' && 'Notification' in window && Notification.permission === 'granted') {
+      try { new Notification('👨‍👩‍👧 ' + who + ' joined your family', { body: 'Open Daysie to start sharing.', tag: 'fam-join-' + m.userId }); } catch (e) {}
+    }
+  });
+  famSeen = ids;
+}
+
 function authHeaders(json) {
   const h = { Authorization: `Bearer ${settings.authToken}` };
   if (json) h['Content-Type'] = 'application/json';
@@ -36,6 +54,7 @@ async function loadFamily() {
     if (!res.ok) return;
     const d = await res.json();
     window.family = { familyId: d.familyId || null, members: d.members || [] };
+    notifyNewMembers(window.family.members);
     renderFamily();
     if (typeof buildAssigneePicker === 'function') buildAssigneePicker();
   } catch (e) { console.error('loadFamily', e); }
@@ -332,5 +351,7 @@ function familyBoot() {
   loadFamilyLists();
 }
 setTimeout(familyBoot, 900);
-setInterval(() => { if (settings.authToken && document.visibilityState === 'visible') loadFamilyInbox(); }, 60000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden && settings.authToken) { loadFamilyInbox(); loadFamily(); } });
+// Poll regularly so a newly joined family member shows up automatically (no
+// manual refresh needed). Also refreshes the inbox and shared lists.
+setInterval(() => { if (settings.authToken && document.visibilityState === 'visible') { loadFamilyInbox(); loadFamily(); loadFamilyLists(); } }, 30000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && settings.authToken) { loadFamilyInbox(); loadFamily(); loadFamilyLists(); } });
