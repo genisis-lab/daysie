@@ -5,7 +5,36 @@
 // db, save, esc, toast, confirm, id, fmt, getProfile, renderAll, ensureAccount,
 // profileColors, profileEmojis, buildAssigneePicker.
 // ============================================================================
-window.family = { familyId: null, members: [] };
+const FAMILY_CACHE_KEY = 'daysie.family.v1';
+
+// Family modal polish loaded here so it works even before the stylesheet cache updates.
+(function addFamilyRuntimeStyles() {
+  if (document.getElementById('familyRuntimeStyles')) return;
+  const st = document.createElement('style');
+  st.id = 'familyRuntimeStyles';
+  st.textContent = `#familyDialog label,#familyDialog input,#familyDialog select{min-width:0;max-width:100%}#remindWhen{display:block;width:100%}`;
+  document.head.appendChild(st);
+})();
+
+function readCachedFamily() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(FAMILY_CACHE_KEY) || 'null');
+    if (cached && cached.familyId && Array.isArray(cached.members)) return cached;
+  } catch (e) {}
+  return null;
+}
+
+function cacheFamily(fam) {
+  try {
+    if (fam && fam.familyId && Array.isArray(fam.members) && fam.members.length) {
+      localStorage.setItem(FAMILY_CACHE_KEY, JSON.stringify({ familyId: fam.familyId, members: fam.members }));
+    } else {
+      localStorage.removeItem(FAMILY_CACHE_KEY);
+    }
+  } catch (e) {}
+}
+
+window.family = readCachedFamily() || { familyId: null, members: [] };
 window.familyInbox = [];
 window.familyLists = [];
 let famNewEmoji = '🌼';
@@ -48,12 +77,31 @@ function inFamily() {
 }
 
 async function loadFamily() {
-  if (!settings.authToken) { window.family = { familyId: null, members: [] }; renderFamily(); return; }
+  // Sync is supposed to be automatic. If family loads while account creation is
+  // still finishing, wait for that account instead of clearing the roster.
+  if (!settings.authToken && typeof ensureAccount === 'function') await ensureAccount();
+  if (!settings.authToken) { renderFamily(); return; }
+
+  const hadFamily = !!(window.family && window.family.familyId && (window.family.members || []).length);
   try {
     const res = await fetch(`${API}/family`, { headers: authHeaders() });
     if (!res.ok) return;
     const d = await res.json();
-    window.family = { familyId: d.familyId || null, members: d.members || [] };
+    const nextFamily = { familyId: d.familyId || null, members: d.members || [] };
+
+    // Do not let a transient empty response wipe the visible family. This is the
+    // symptom the app was showing: join response renders the roster, then the
+    // next menu/poll briefly asks before sync/family state is fully settled and
+    // replaces it with "no family". Keep the last known family until the user
+    // explicitly leaves or a real roster replaces it.
+    if (!nextFamily.familyId && !(nextFamily.members || []).length && hadFamily) {
+      renderFamily();
+      if (typeof buildAssigneePicker === 'function') buildAssigneePicker();
+      return;
+    }
+
+    window.family = nextFamily;
+    cacheFamily(window.family);
     notifyNewMembers(window.family.members);
     renderFamily();
     if (typeof buildAssigneePicker === 'function') buildAssigneePicker();
@@ -87,9 +135,10 @@ function renderFamily() {
   renderFamilyLists();
 }
 
-function openFamilyDialog() {
+async function openFamilyDialog() {
   const dlg = $('#familyDialog');
   if (!dlg) return;
+  if (!settings.authToken && typeof ensureAccount === 'function') await ensureAccount();
   const me = meProfile();
   famNewEmoji = me.emoji || '🌼';
   famNewColor = me.color || 'sun';
@@ -108,8 +157,8 @@ function openFamilyDialog() {
   const body = $('#familyBody');
   if (settings.authToken) { gate && gate.classList.add('hidden'); body && body.classList.remove('hidden'); }
   else { gate && gate.classList.remove('hidden'); body && body.classList.add('hidden'); }
-  loadFamily();
   dlg.showModal();
+  loadFamily();
 }
 
 function wire(sel, handler, evt) {
@@ -156,6 +205,7 @@ wire('#famJoinBtn', async () => {
     if (!res.ok) return toast('That code did not work', 'Double-check it and try again.');
     const d = await res.json();
     window.family = { familyId: d.familyId, members: d.members || [] };
+    cacheFamily(window.family);
     $('#famJoinCode').value = '';
     renderFamily();
     if (typeof buildAssigneePicker === 'function') buildAssigneePicker();
@@ -168,6 +218,7 @@ wire('#familyLeaveBtn', () => {
   confirm('👋', 'Leave this family?', 'You will stop sharing lists and assignments with them. Your own data stays.', async () => {
     try { await fetch(`${API}/family/leave`, { method: 'POST', headers: authHeaders() }); } catch (e) {}
     window.family = { familyId: null, members: [] };
+    cacheFamily(window.family);
     window.familyLists = [];
     renderFamily();
     if (typeof buildAssigneePicker === 'function') buildAssigneePicker();
@@ -181,6 +232,7 @@ wire('#closeFamily', () => $('#familyDialog').close());
 
 // Send a task to a linked member's account (called from app.js save handler).
 async function assignTaskToMember(userId, data) {
+  if (!(await ensureAccount())) return toast('Could not assign', 'Sync is not ready yet. Try again.');
   const m = (window.family.members || []).find((x) => x.userId === userId);
   try {
     const res = await fetch(`${API}/family/assign`, {
@@ -189,7 +241,11 @@ async function assignTaskToMember(userId, data) {
     });
     if (!res.ok) throw new Error('assign failed');
     toast('📋 Sent to ' + (m ? m.name : 'family'), 'It landed in their Daysie.');
-  } catch (e) { toast('Could not assign', 'Check your connection and try again.'); }
+    await loadFamilyInbox();
+  } catch (e) {
+    await loadFamily();
+    toast('Could not assign', 'Check your connection and try again.');
+  }
 }
 
 // ---- Send a reminder to a member -----------------------------------------
@@ -344,8 +400,11 @@ function renderFamilyLists() {
 }
 
 // ---- Boot + polling -------------------------------------------------------
-function familyBoot() {
+async function familyBoot() {
+  if (!settings.authToken && typeof ensureAccount === 'function') await ensureAccount();
   if (!settings.authToken) return;
+  renderFamily();
+  if (typeof buildAssigneePicker === 'function') buildAssigneePicker();
   loadFamily();
   loadFamilyInbox();
   loadFamilyLists();
