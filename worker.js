@@ -297,6 +297,7 @@ export default {
           .run();
         const rows = await env.DB.prepare('SELECT user_id, name, emoji, color FROM family_members WHERE family_id = ? ORDER BY joined ASC').bind(inv.family_id).all();
         const members = rows.results.map((m) => ({ userId: m.user_id, name: m.name, emoji: m.emoji, color: m.color, isMe: m.user_id === userId }));
+        await notifyFamilyJoined(env, inv.family_id, userId, name || 'Me');
         return json({ success: true, familyId: inv.family_id, members }, 200, corsHeaders);
       }
 
@@ -523,6 +524,24 @@ async function pushAssignedItem(env, item) {
     }
   } catch (e) {
     console.error('pushAssignedItem error:', e);
+  }
+}
+
+// Helper: notify existing family members (via push) that a new person joined.
+async function notifyFamilyJoined(env, familyId, newUserId, newName) {
+  try {
+    const others = await env.DB.prepare('SELECT user_id FROM family_members WHERE family_id = ? AND user_id != ?').bind(familyId, newUserId).all();
+    for (const o of others.results) {
+      const subRow = await env.DB.prepare('SELECT subscription FROM push_subscriptions WHERE user_id = ?').bind(o.user_id).first();
+      if (!subRow) continue;
+      const sub = JSON.parse(subRow.subscription);
+      const status = await sendPushNotification(env, sub, { title: '👨‍👩‍👧 ' + (newName || 'Someone') + ' joined your family', body: 'You can now share lists and assign tasks in Daysie.', tag: 'fam-join-' + newUserId, requireInteraction: false });
+      if (status === 404 || status === 410) {
+        await env.DB.prepare('DELETE FROM push_subscriptions WHERE user_id = ?').bind(o.user_id).run();
+      }
+    }
+  } catch (e) {
+    console.error('notifyFamilyJoined error:', e);
   }
 }
 
