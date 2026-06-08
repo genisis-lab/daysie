@@ -10,13 +10,14 @@
 //  - Cross-origin assets (e.g. the three.js CDN): cache-first (they're immutable).
 //  - We do NOT auto-skipWaiting; the page shows an update banner and asks this
 //    worker to activate only when the user taps "Refresh".
-const CACHE_NAME = 'daysie-v5';
+const CACHE_NAME = 'daysie-v6';
 const CORE = [
   './',
   './index.html',
   './styles.css',
   './app.js',
   './app2.js',
+  './app3.js',
   './favicon.svg',
   './site.webmanifest',
   './version.json',
@@ -107,7 +108,13 @@ self.addEventListener('push', (event) => {
     requireInteraction: !!data.requireInteraction,
     data: data.url || './',
   };
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil((async () => {
+    if (data.type === 'family-list-updated') {
+      const wins = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+      wins.forEach((w) => w.postMessage({ type: 'family-list-updated', body: data.body || '' }));
+    }
+    await self.registration.showNotification(title, options);
+  })());
 });
 
 // Notification click - focus an existing tab or open the app.
