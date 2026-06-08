@@ -1457,21 +1457,15 @@ function updateAccountUI() {
 // Turn on sync: create a fresh account on this device (becomes the owner)
 $('#enableSyncBtn').onclick = async () => {
   toast('☁️ Turning on sync...', '');
-  try {
-    const res = await fetch(`${API}/account/create`, { method: 'POST' });
-    if (!res.ok) throw new Error('create failed');
-    const data = await res.json();
-    settings.authToken = data.token;
-    settings.userId = data.userId;
-    saveSettings();
-    updateAccountUI();
-    updateSyncStatus();
-    toast('🎉 Sync is on!', 'Now link your other devices with a code.');
-    syncToCloud();
-  } catch (e) {
-    console.error(e);
-    toast('❌ Could not turn on sync', 'Check your connection and try again.');
-  }
+  // Reuse the account this device may already have created on boot instead of
+  // minting a brand-new (empty) one, which would detach this device from any
+  // family it had already joined.
+  const ok = await ensureAccount();
+  if (!ok) { toast('❌ Could not turn on sync', 'Check your connection and try again.'); return; }
+  updateAccountUI();
+  updateSyncStatus();
+  toast('🎉 Sync is on!', 'Now link your other devices with a code.');
+  syncToCloud();
 };
 
 // New device: reveal the "enter code" box
@@ -1738,22 +1732,39 @@ async function pullFromCloud() {
 // Closed-app push requires the server to hold the subscription + due times, so
 // enabling notifications quietly turns on sync behind the scenes — there is no
 // separate step for the user to think about.
+// Single-flight account creation. Several callers can ask for an account at the
+// same moment — on a fresh device boot() fires BOTH autoEnableSync() and
+// refreshPushSubscription(), and the user may also tap Join/Invite — each of
+// which calls ensureAccount(). Without a shared in-flight guard, every caller
+// would POST /account/create separately and the device would end up with
+// MULTIPLE server accounts. Family membership, the push subscription, and the
+// synced data then scatter across those accounts, which is why a joined family
+// shows briefly and then vanishes (the roster poll runs as a different account
+// that isn't in the family). Sharing one promise guarantees exactly one
+// account per device.
+let accountCreationPromise = null;
 async function ensureAccount() {
   if (settings.authToken) return true;
-  try {
-    const res = await fetch(`${API}/account/create`, { method: 'POST' });
-    if (!res.ok) throw new Error('create failed');
-    const data = await res.json();
-    settings.authToken = data.token;
-    settings.userId = data.userId;
-    saveSettings();
-    updateAccountUI();
-    updateSyncStatus();
-    return true;
-  } catch (e) {
-    console.error('Auto account error:', e);
-    return false;
-  }
+  if (accountCreationPromise) return accountCreationPromise;
+  accountCreationPromise = (async () => {
+    try {
+      const res = await fetch(`${API}/account/create`, { method: 'POST' });
+      if (!res.ok) throw new Error('create failed');
+      const data = await res.json();
+      settings.authToken = data.token;
+      settings.userId = data.userId;
+      saveSettings();
+      updateAccountUI();
+      updateSyncStatus();
+      return true;
+    } catch (e) {
+      console.error('Auto account error:', e);
+      return false;
+    } finally {
+      accountCreationPromise = null;
+    }
+  })();
+  return accountCreationPromise;
 }
 
 // Sync is ON by default: silently provision an anonymous cloud account on first
