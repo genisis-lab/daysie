@@ -232,7 +232,7 @@ function boot() {
   applyTheme();
   buildPickers();
   $('#dailyQuote').textContent = quotes[Math.floor(Math.random() * quotes.length)];
-  if (db.onboarded) showApp();
+  if (db.onboarded) { showApp(); autoEnableSync(); }
   else $('#welcome').classList.remove('hidden');
 
   setupServiceWorker();
@@ -338,6 +338,7 @@ $('#startBtn').onclick = () => {
   db.onboarded = true;
   save();
   showApp();
+  autoEnableSync();
   if (!db.tourDone) setTimeout(startTour, 400);
 };
 
@@ -1753,6 +1754,19 @@ async function ensureAccount() {
     console.error('Auto account error:', e);
     return false;
   }
+}
+
+// Sync is ON by default: silently provision an anonymous cloud account on first
+// launch so the profile and Family features work right away — no manual
+// "turn on sync" step. Devices that later link to an existing account via a
+// pairing code overwrite this token during approval, so this is safe.
+async function autoEnableSync() {
+  if (settings.authToken) return;
+  const ok = await ensureAccount();
+  if (!ok) return;
+  await syncToCloud();
+  if (typeof pushMyProfile === 'function') pushMyProfile();
+  if (typeof familyBoot === 'function') familyBoot();
 }
 
 // Unified "enable notifications" flow shared by the home banner and Settings.
