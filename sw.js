@@ -1,16 +1,5 @@
-// Daysie Service Worker - update-friendly caching + push notifications
-//
-// Strategy:
-//  - Same-origin app files (HTML/JS/CSS/JSON): NETWORK-FIRST with `cache: 'no-store'`
-//    so a reload ALWAYS pulls the freshly deployed files. The previous version
-//    let the browser's HTTP cache keep serving a stale app.js even after a
-//    reload, so version.json (fetched no-store) reported a new build while the
-//    running APP_VERSION never changed -- which made the "new version" banner
-//    stick forever, even after tapping Refresh. Falls back to cache offline.
-//  - Cross-origin assets (e.g. the three.js CDN): cache-first (they're immutable).
-//  - We do NOT auto-skipWaiting; the page shows an update banner and asks this
-//    worker to activate only when the user taps "Refresh".
-const CACHE_NAME = 'daysie-v6';
+// Daysie Service Worker - update-friendly caching + family-list hotfix
+const CACHE_NAME = 'daysie-v7';
 const CORE = [
   './',
   './index.html',
@@ -24,15 +13,60 @@ const CORE = [
   'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js',
 ];
 
-// Install - pre-cache the app shell for offline use.
+// This small patch is appended to app3.js at fetch time. It avoids another huge
+// app3.js upload while still fixing the Family modal field width and making
+// shared-list edits notify the rest of the family immediately.
+const APP3_HOTFIX = `
+;(() => {
+  try {
+    const style = document.createElement('style');
+    style.id = 'familyHotfixStyles';
+    style.textContent = '#familyDialog label,#familyDialog input,#familyDialog select{min-width:0!important;max-width:100%!important;box-sizing:border-box!important}#remindWhen{display:block!important;width:100%!important;max-width:100%!important;appearance:none!important;-webkit-appearance:none!important}';
+    document.head.appendChild(style);
+  } catch (e) {}
+
+  async function notifySharedListUpdate(actionText) {
+    try {
+      if (!settings || !settings.authToken || !window.family || !window.family.familyId) return;
+      const members = (window.family.members || []).filter((m) => !m.isMe && m.userId);
+      if (!members.length) return;
+      const title = 'Shared list updated';
+      await Promise.allSettled(members.map((m) => fetch(API + '/family/remind', {
+        method: 'POST',
+        headers: authHeaders(true),
+        body: JSON.stringify({ toUser: m.userId, title: title, fireAt: Date.now() })
+      })));
+    } catch (e) {}
+  }
+
+  if (typeof saveFamilyLists === 'function' && !saveFamilyLists.__daysieHotfix) {
+    const originalSaveFamilyLists = saveFamilyLists;
+    saveFamilyLists = async function(actionText) {
+      await originalSaveFamilyLists.apply(this, arguments);
+      await notifySharedListUpdate(actionText || 'updated a shared list');
+    };
+    saveFamilyLists.__daysieHotfix = true;
+  }
+
+  if ('serviceWorker' in navigator && !window.__daysieFamilyListMessageHotfix) {
+    window.__daysieFamilyListMessageHotfix = true;
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      if (event.data && event.data.type === 'family-list-updated') {
+        try { if (typeof loadFamily === 'function') loadFamily(); } catch (e) {}
+        try { if (typeof loadFamilyLists === 'function') loadFamilyLists(); } catch (e) {}
+        try { if (typeof toast === 'function') toast('📝 Shared list updated', event.data.body || 'A family member changed a list.'); } catch (e) {}
+      }
+    });
+  }
+})();
+`;
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE)).catch(() => {})
   );
-  // Intentionally NOT calling self.skipWaiting() here.
 });
 
-// Activate - clean old caches and take control.
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
@@ -42,7 +76,6 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Allow the page to activate a waiting worker on demand.
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
@@ -53,10 +86,30 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(req.url);
 
-  // Network-first (no-store) for our own files so new deploys always win on a
-  // normal reload. We still copy successful responses into the cache for
-  // offline use.
   if (url.origin === self.location.origin) {
+    // Patch app3.js as it loads so family-list updates can notify everyone and
+    // the When field gets the same width behavior as other fields.
+    if (url.pathname.endsWith('/app3.js')) {
+      event.respondWith(
+        fetch(req, { cache: 'no-store' })
+          .then(async (res) => {
+            if (!res || !res.ok) throw new Error('app3 fetch failed');
+            const text = await res.text();
+            const patched = text.includes('__daysieFamilyListMessageHotfix') ? text : text + '\n' + APP3_HOTFIX;
+            const out = new Response(patched, {
+              status: 200,
+              statusText: 'OK',
+              headers: { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'no-store' },
+            });
+            const copy = out.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+            return out;
+          })
+          .catch(() => caches.match(req).then((cached) => cached || caches.match('./index.html')))
+      );
+      return;
+    }
+
     event.respondWith(
       fetch(req, { cache: 'no-store' })
         .then((res) => {
@@ -66,42 +119,32 @@ self.addEventListener('fetch', (event) => {
           }
           return res;
         })
-        .catch(() =>
-          caches.match(req).then((cached) => cached || caches.match('./index.html'))
-        )
+        .catch(() => caches.match(req).then((cached) => cached || caches.match('./index.html')))
     );
     return;
   }
 
-  // Cache-first for cross-origin assets (CDN libraries, etc.).
   event.respondWith(
     caches.match(req).then(
-      (cached) =>
-        cached ||
-        fetch(req)
-          .then((res) => {
-            if (res && res.status === 200) {
-              const copy = res.clone();
-              caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
-            }
-            return res;
-          })
-          .catch(() => cached)
+      (cached) => cached || fetch(req).then((res) => {
+        if (res && res.status === 200) {
+          const copy = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
+        }
+        return res;
+      }).catch(() => cached)
     )
   );
 });
 
-// Push notifications - show the reminder even when Daysie is closed.
 self.addEventListener('push', (event) => {
   let data = {};
-  try {
-    data = event.data ? event.data.json() : {};
-  } catch (e) {
-    data = { body: event.data ? event.data.text() : '' };
-  }
+  try { data = event.data ? event.data.json() : {}; }
+  catch (e) { data = { body: event.data ? event.data.text() : '' }; }
   const title = data.title || '⏰ Daysie Reminder';
+  const body = data.body || 'You have a reminder!';
   const options = {
-    body: data.body || 'You have a reminder!',
+    body,
     icon: './favicon.svg',
     badge: './favicon.svg',
     tag: data.tag || 'daysie-reminder',
@@ -109,22 +152,19 @@ self.addEventListener('push', (event) => {
     data: data.url || './',
   };
   event.waitUntil((async () => {
-    if (data.type === 'family-list-updated') {
+    if (data.type === 'family-list-updated' || /shared list/i.test(title + ' ' + body)) {
       const wins = await clients.matchAll({ type: 'window', includeUncontrolled: true });
-      wins.forEach((w) => w.postMessage({ type: 'family-list-updated', body: data.body || '' }));
+      wins.forEach((w) => w.postMessage({ type: 'family-list-updated', body }));
     }
     await self.registration.showNotification(title, options);
   })());
 });
 
-// Notification click - focus an existing tab or open the app.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
-      for (const w of wins) {
-        if ('focus' in w) return w.focus();
-      }
+      for (const w of wins) if ('focus' in w) return w.focus();
       return clients.openWindow(event.notification.data || './');
     })
   );
