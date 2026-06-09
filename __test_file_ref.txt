@@ -1,0 +1,1 @@
+@/data/daysie/version.json
