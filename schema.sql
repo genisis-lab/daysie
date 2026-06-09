@@ -57,3 +57,39 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires);
 CREATE INDEX IF NOT EXISTS idx_pair_codes_user ON pair_codes(user_id);
 CREATE INDEX IF NOT EXISTS idx_pair_codes_expires ON pair_codes(expires);
+
+
+CREATE TABLE IF NOT EXISTS family_members (
+  family_id TEXT,
+  user_id TEXT PRIMARY KEY,
+  name TEXT,
+  emoji TEXT,
+  color TEXT,
+  joined INTEGER
+);
+CREATE TABLE IF NOT EXISTS family_invites (
+  code TEXT PRIMARY KEY,
+  family_id TEXT,
+  created INTEGER,
+  expires INTEGER
+);
+CREATE TABLE IF NOT EXISTS family_data (
+  family_id TEXT PRIMARY KEY,
+  lists TEXT,
+  updated INTEGER
+);
+CREATE TABLE IF NOT EXISTS assigned_items (
+  id TEXT PRIMARY KEY,
+  family_id TEXT,
+  from_user TEXT,
+  to_user TEXT,
+  kind TEXT,
+  payload TEXT,
+  fire_at INTEGER,
+  status TEXT,
+  notified INTEGER,
+  created INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_family_members_family ON family_members(family_id);
+CREATE INDEX IF NOT EXISTS idx_assigned_to ON assigned_items(to_user, status);
+CREATE INDEX IF NOT EXISTS idx_assigned_due ON assigned_items(notified, status, fire_at);
