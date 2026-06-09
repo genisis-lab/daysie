@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" id="themeColorMeta" content="#fff7ed" />
-  <title>Daysie — Reminders & Journal</title>
+  <title>Daysie — Reminders &amp; Journal</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="favicon.svg" />
   <link rel="manifest" href="site.webmanifest" />
@@ -23,7 +23,7 @@
   </div>
 
   <!-- WELCOME -->
-  <section id="welcome" class="welcome">
+  <section id="welcome" class="welcome hidden">
     <div class="logo big">🌼</div>
     <h1>Daysie</h1>
     <p>Your gentle family helper for reminders, reflections, and growing one day at a time.</p>
@@ -92,10 +92,6 @@
       </div>
 
       <!-- FAMILY LISTS (shared across linked accounts) -->
-      <div id="familyListsSection" class="hidden">
-        <div class="section-head"><h2>👪 Family lists</h2></div>
-        <div id="familyListsList" class="lists-list"></div>
-      </div>
 
       <!-- ON THIS DAY -->
       <div id="onThisDaySection" class="hidden">
@@ -175,6 +171,7 @@
       <div id="stats" class="stats"></div>
       <article class="card"><h2>😊 Mood this week</h2><div id="moodBars" class="bars"></div></article>
       <article class="card"><h2>📈 Mood this month</h2><div id="moodTrend" class="mood-trend"></div></article>
+      <article class="card"><h2>🌱 Habit streaks</h2><div id="habitInsights" class="habit-insights"></div></article>
       <article class="card"><h2>🏅 Little wins</h2><div id="badges"></div></article>
       <div class="row" style="margin-top:12px">
         <button id="exportBtn" class="soft">⬇️ Export JSON</button>
@@ -368,6 +365,7 @@
             <div>
               <b>Sync is on</b>
               <small>Synced across your linked devices</small>
+              <small id="deviceUserId">Account connected</small>
             </div>
           </div>
           <button type="button" id="linkDeviceBtn" class="primary wide" style="margin:8px 0">➕ Link another device</button>
@@ -378,6 +376,7 @@
             <p style="text-align:center;color:var(--soft)">Waiting for the other device…</p>
           </div>
           <button type="button" id="syncNowBtn" class="soft wide" style="margin:8px 0">🔄 Sync now</button>
+          <button type="button" id="revokeOtherDevicesBtn" class="soft wide" style="margin:8px 0">🔒 Log out other devices</button>
           <button type="button" id="signOutBtn" class="soft wide">Turn off sync on this device</button>
         </div>
       </div>
