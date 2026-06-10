@@ -1,5 +1,5 @@
 // Daysie Service Worker - update-friendly caching + push notifications
-const CACHE_NAME = 'daysie-v17';
+const CACHE_NAME = 'daysie-v18';
 const CORE = [
   './', './index.html', './styles.css', './app.js', './app2.js', './app3.js',
   './favicon.svg', './site.webmanifest', './version.json',
@@ -77,8 +77,4 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  event.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => {
-    for (const w of wins) if ('focus' in w) return w.focus();
-    return clients.openWindow(event.notification.data || './');
-  }));
-});
+  event.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then((
