@@ -46,19 +46,19 @@
       </p>
       <div class="welcome-grid">
         <article>
-          <b>⏰ Friendly reminders</b
+          <b><span class="inline-icon">⏰</span>Friendly reminders</b
           ><span>Set a task, time, repeat, and priority.</span>
         </article>
         <article>
-          <b>📖 Cozy journal</b
+          <b><span class="inline-icon">📖</span>Cozy journal</b
           ><span>Track moods, prompts, tags, and memories.</span>
         </article>
         <article>
-          <b>👨‍👩‍👧 Family linking</b
+          <b><span class="inline-icon">👨‍👩‍👧</span>Family linking</b
           ><span>Link accounts to share tasks &amp; lists.</span>
         </article>
         <article>
-          <b>☁️ Sync across devices</b
+          <b><span class="inline-icon">☁️</span>Sync across devices</b
           ><span>Optional account keeps everything in sync.</span>
         </article>
       </div>
@@ -263,8 +263,21 @@
           <div id="badges"></div>
         </article>
         <div class="row" style="margin-top: 12px">
-          <button id="exportBtn" class="soft">⬇️ Export JSON</button>
-          <button id="exportPdfBtn" class="soft">📄 Export PDF</button>
+          <button id="exportBtn" class="soft">
+            <span class="inline-icon">⬇️</span>Export JSON
+          </button>
+          <button id="importBtn" class="soft">
+            <span class="inline-icon">⬆️</span>Import JSON
+          </button>
+          <button id="exportPdfBtn" class="soft">
+            <span class="inline-icon">📄</span>Export PDF
+          </button>
+          <input
+            type="file"
+            id="importFile"
+            accept="application/json,.json"
+            class="hidden"
+          />
         </div>
       </section>
     </main>
@@ -536,9 +549,15 @@
 
         <p class="label">Theme</p>
         <div class="chips" id="themePicker">
-          <button type="button" data-theme="light">☀️ Light</button>
-          <button type="button" data-theme="dark">🌙 Dark</button>
-          <button type="button" data-theme="hc">⬛ High contrast</button>
+          <button type="button" data-theme="light">
+            <span class="inline-icon">☀️</span>Light
+          </button>
+          <button type="button" data-theme="dark">
+            <span class="inline-icon">🌙</span>Dark
+          </button>
+          <button type="button" data-theme="hc">
+            <span class="inline-icon">⬛</span>High contrast
+          </button>
         </div>
 
         <p class="label">Text size</p>
@@ -550,7 +569,7 @@
 
         <hr style="border-color: var(--line); margin: 18px 0" />
 
-        <h3>☁️ Sync & account</h3>
+        <h3><span class="inline-icon">☁️</span>Sync & account</h3>
         <div id="accountSection">
           <div id="loggedOutSection">
             <p style="color: var(--soft)">
@@ -558,13 +577,14 @@
               sync here, then link your other devices with a short code.
             </p>
             <button type="button" id="enableSyncBtn" class="primary wide">
-              ☁️ Turn on sync
+              <span class="inline-icon">☁️</span>Turn on sync
             </button>
             <div style="text-align: center; margin: 10px 0; color: var(--soft)">
               — or —
             </div>
             <button type="button" id="haveCodeBtn" class="soft wide">
-              🔢 I have a code from another device
+              <span class="inline-icon">🔢</span>I have a code from another
+              device
             </button>
             <div id="enterCodeSection" class="hidden" style="margin-top: 12px">
               <label
@@ -600,6 +620,8 @@
                 <b>Sync is on</b>
                 <small>Synced across your linked devices</small>
                 <small id="deviceUserId">Account connected</small>
+                <small id="sessionStatus">Checking linked devices…</small>
+                <small id="photoStorageStatus">Checking cloud photos…</small>
               </div>
             </div>
             <button
@@ -608,7 +630,7 @@
               class="primary wide"
               style="margin: 8px 0"
             >
-              ➕ Link another device
+              <span class="inline-icon">➕</span>Link another device
             </button>
             <div id="linkCodeSection" class="hidden" style="margin: 4px 0 8px">
               <p style="color: var(--soft)">
@@ -643,7 +665,7 @@
               class="soft wide"
               style="margin: 8px 0"
             >
-              🔄 Sync now
+              <span class="inline-icon">🔄</span>Sync now
             </button>
             <button
               type="button"
@@ -651,7 +673,15 @@
               class="soft wide"
               style="margin: 8px 0"
             >
-              🔒 Log out other devices
+              <span class="inline-icon">🔒</span>Log out other devices
+            </button>
+            <button
+              type="button"
+              id="cleanupPhotosBtn"
+              class="soft wide"
+              style="margin: 8px 0"
+            >
+              <span class="inline-icon">🧹</span>Clean unused cloud photos
             </button>
             <button type="button" id="signOutBtn" class="soft wide">
               Turn off sync on this device
@@ -664,13 +694,13 @@
         <p class="label">Push notifications (real, even when closed)</p>
         <div id="pushSection">
           <button type="button" id="subscribePushBtn" class="soft wide">
-            🔔 Enable push notifications
+            <span class="inline-icon">🔔</span>Enable push notifications
           </button>
         </div>
 
         <hr style="border-color: var(--line); margin: 18px 0" />
         <button type="button" id="replayTourBtn" class="soft wide">
-          🧭 Replay welcome tour
+          <span class="inline-icon">🧭</span>Replay welcome tour
         </button>
 
         <button

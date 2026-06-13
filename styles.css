@@ -55,6 +55,9 @@ body[data-theme=dark] .hero-card p{color:var(--sun)}
 button,.primary,.soft,input,textarea{font:inherit}
 button{cursor:pointer}
 .primary,.soft{border:0;border-radius:14px;padding:12px 17px;font-weight:900}
+.primary,.soft,.chips button{display:inline-flex;align-items:center;justify-content:center;gap:.35em}
+.inline-icon{display:inline-block;flex:0 0 auto;margin-right:.35em}
+.primary .inline-icon,.soft .inline-icon,.chips button .inline-icon{margin-right:0}
 .primary{background:linear-gradient(135deg,var(--sun),var(--sun2));color:#6e4a08;box-shadow:0 8px 18px #f3ad3252}
 .soft{background:#fff1e6;color:var(--soft);border:1.5px solid var(--line)}
 body[data-theme=dark] .soft{background:var(--card)}
@@ -338,4 +341,3 @@ dialog{max-width:min(560px,calc(100vw - 24px));overflow:hidden}
 .habit-dots i{width:12px;height:12px;border-radius:50%;background:var(--line);display:block}
 .habit-dots i.on{background:var(--hc, var(--green));box-shadow:0 0 0 3px color-mix(in srgb,var(--hc, var(--green)) 20%,transparent)}
 #deviceUserId{display:block;margin-top:2px;opacity:.75}
-
