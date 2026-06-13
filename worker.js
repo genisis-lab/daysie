@@ -9,7 +9,23 @@ export default {
       };
     if ("OPTIONS" === e.method) return new Response(null, { headers: m });
     try {
-      if ((await i(E), "/account/create" === p && "POST" === e.method)) {
+      if ((await i(E), "/health" === p && "GET" === e.method)) {
+        let r = !1;
+        try {
+          (await E.DB.prepare("SELECT 1 AS ok").first(), (r = !0));
+        } catch (e) {}
+        return c(
+          {
+            ok: r,
+            service: "daysie-api",
+            storage: { d1: r, photos: !!E.PHOTOS },
+            time: new Date().toISOString(),
+          },
+          r ? 200 : 503,
+          m,
+        );
+      }
+      if ("/account/create" === p && "POST" === e.method) {
         const r = e.headers.get("CF-Connecting-IP") || "unknown";
         if (!(await u(E, "acct:" + r, 10, 36e5)))
           return c(
@@ -180,6 +196,28 @@ export default {
           c({ success: !0 }, 200, m)
         );
       }
+      if ("/sessions" === p && "GET" === e.method) {
+        const i = await r(e, E);
+        if (!i) return c({ error: "Unauthorized" }, 401, m);
+        const t = e.headers.get("Authorization") || "",
+          a = t.startsWith("Bearer ") ? t.substring(7) : "",
+          n = await E.DB.prepare(
+            "SELECT token, expires FROM sessions WHERE user_id = ? ORDER BY expires DESC",
+          )
+            .bind(i)
+            .all();
+        return c(
+          {
+            sessions: (n.results || []).map((e) => ({
+              current: e.token === a,
+              tokenSuffix: String(e.token || "").slice(-6),
+              expires: e.expires,
+            })),
+          },
+          200,
+          m,
+        );
+      }
       if ("/data" === p && "GET" === e.method) {
         const i = await r(e, E);
         if (!i) return c({ error: "Unauthorized" }, 401, m);
@@ -241,6 +279,58 @@ export default {
             .run(),
           c({ key: n, token: s }, 200, m)
         );
+      }
+      if ("/photos" === p && "GET" === e.method) {
+        const i = await r(e, E);
+        if (!i) return c({ error: "Unauthorized" }, 401, m);
+        const t = new URL(e.url).origin,
+          a = await E.DB.prepare(
+            "SELECT key, token, created_at FROM photo_access WHERE user_id = ? ORDER BY created_at DESC",
+          )
+            .bind(i)
+            .all();
+        return c(
+          {
+            photos: (a.results || []).map((e) => ({
+              key: e.key,
+              createdAt: e.created_at,
+              url: `${t}/photo/${encodeURIComponent(e.key)}?token=${encodeURIComponent(e.token)}`,
+            })),
+          },
+          200,
+          m,
+        );
+      }
+      if ("/photos/prune-unused" === p && "POST" === e.method) {
+        const i = await r(e, E);
+        if (!i) return c({ error: "Unauthorized" }, 401, m);
+        if (!E.PHOTOS)
+          return c({ error: "Photo storage not configured" }, 503, m);
+        const t = await E.DB.prepare(
+            "SELECT data FROM user_data WHERE user_id = ?",
+          )
+            .bind(i)
+            .first(),
+          a = new Set();
+        if (t && t.data)
+          try {
+            v(JSON.parse(t.data), a);
+          } catch (e) {}
+        const n = await E.DB.prepare(
+          "SELECT key FROM photo_access WHERE user_id = ?",
+        )
+          .bind(i)
+          .all();
+        let s = 0;
+        for (const e of n.results || [])
+          e.key &&
+            !a.has(e.key) &&
+            (await E.PHOTOS.delete(e.key),
+            await E.DB.prepare("DELETE FROM photo_access WHERE key = ?")
+              .bind(e.key)
+              .run(),
+            s++);
+        return c({ success: !0, deleted: s, kept: a.size }, 200, m);
       }
       if (p.startsWith("/photo/") && "GET" === e.method) {
         if (!E.PHOTOS)
@@ -1016,6 +1106,21 @@ function d(e, r) {
 }
 function h(e) {
   return /^[A-Za-z0-9_-]{1,80}$/.test(String(e || ""));
+}
+function v(e, r) {
+  if (Array.isArray(e)) return void e.forEach((e) => v(e, r));
+  if (e && "object" == typeof e)
+    return void Object.values(e).forEach((e) => v(e, r));
+  if ("string" != typeof e || e.startsWith("data:")) return;
+  try {
+    const i = new URL(e),
+      t = "/photo/",
+      a = i.pathname.indexOf(t);
+    if (a >= 0) {
+      const e = decodeURIComponent(i.pathname.slice(a + t.length));
+      e && r.add(e);
+    }
+  } catch (e) {}
 }
 async function u(e, r, i, t) {
   const a = Date.now(),
