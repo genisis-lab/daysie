@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS pair_codes (
   attempts INTEGER NOT NULL DEFAULT 0,
   redeemed INTEGER NOT NULL DEFAULT 0,
   approved INTEGER NOT NULL DEFAULT 0,
+  redeem_nonce TEXT,
   session_token TEXT,
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
@@ -54,9 +55,18 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
+CREATE TABLE IF NOT EXISTS photo_access (
+  key TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  token TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires);
 CREATE INDEX IF NOT EXISTS idx_pair_codes_user ON pair_codes(user_id);
 CREATE INDEX IF NOT EXISTS idx_pair_codes_expires ON pair_codes(expires);
+CREATE INDEX IF NOT EXISTS idx_photo_access_user ON photo_access(user_id);
 
 
 CREATE TABLE IF NOT EXISTS family_members (
