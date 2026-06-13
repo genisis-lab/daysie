@@ -1,479 +1,863 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" id="themeColorMeta" content="#fff7ed" />
-  <title>Daysie — Reminders & Journal</title>
-  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="favicon.svg" />
-  <link rel="manifest" href="site.webmanifest" />
-  <link rel="stylesheet" href="styles.css" />
-</head>
-<body>
-  <canvas id="garden"></canvas>
-  <div id="toastHost"></div>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" id="themeColorMeta" content="#fff7ed" />
+    <title>Daysie — Reminders & Journal</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="favicon.svg" />
+    <link rel="manifest" href="site.webmanifest" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <canvas id="garden"></canvas>
+    <div id="toastHost"></div>
 
-  <!-- UPDATE BANNER -->
-  <div id="updateBanner" class="hidden" role="alert">
-    <span class="ub-emoji">✨</span>
-    <div class="ub-text"><b>A new version of Daysie is ready</b><small>Refresh to get the latest — your data stays put.</small></div>
-    <button type="button" id="updateReloadBtn">Refresh</button>
-    <button type="button" id="updateDismissBtn" class="ub-dismiss" title="Dismiss" aria-label="Dismiss">✕</button>
-  </div>
-
-  <!-- WELCOME -->
-  <section id="welcome" class="welcome hidden">
-    <div class="logo big">🌼</div>
-    <h1>Daysie</h1>
-    <p>Your gentle family helper for reminders, reflections, and growing one day at a time.</p>
-    <div class="welcome-grid">
-      <article><b>⏰ Friendly reminders</b><span>Set a task, time, repeat, and priority.</span></article>
-      <article><b>📖 Cozy journal</b><span>Track moods, prompts, tags, and memories.</span></article>
-      <article><b>👨‍👩‍👧 Family linking</b><span>Link accounts to share tasks &amp; lists.</span></article>
-      <article><b>☁️ Sync across devices</b><span>Optional account keeps everything in sync.</span></article>
-    </div>
-    <input id="nameInput" maxlength="24" placeholder="What should Daysie call you?" />
-    <button id="startBtn" class="primary wide">Let's begin ✨</button>
-  </section>
-
-  <!-- MAIN APP -->
-  <main id="app" class="app hidden">
-    <header class="topbar">
-      <div class="brand">
-        <div class="logo">🌼</div>
-        <div><h1>Daysie</h1><p>remember · reflect · grow</p></div>
+    <!-- UPDATE BANNER -->
+    <div id="updateBanner" class="hidden" role="alert">
+      <span class="ub-emoji">✨</span>
+      <div class="ub-text">
+        <b>A new version of Daysie is ready</b
+        ><small>Refresh to get the latest — your data stays put.</small>
       </div>
-      <div class="topbar-right">
-        <button id="profileBtn" class="profile-btn" title="Family"><span id="profileEmoji">🌼</span><span id="profileName">Me</span></button>
-        <button id="settingsBtn" class="icon-btn" title="Settings">⚙️</button>
-      </div>
-    </header>
-
-    <div class="sub-header">
-      <div><b id="helloText">Hi!</b><span id="dateText"></span></div>
-      <div id="syncStatus" class="sync-status hidden"></div>
+      <button type="button" id="updateReloadBtn">Refresh</button>
+      <button
+        type="button"
+        id="updateDismissBtn"
+        class="ub-dismiss"
+        title="Dismiss"
+        aria-label="Dismiss"
+      >
+        ✕
+      </button>
     </div>
 
-    <aside id="notifyBanner" class="banner hidden">
-      <span>🔔</span>
-      <p><b>Turn on reminders</b><small>Allow notifications so Daysie can nudge you on time.</small></p>
-      <button id="notifyBtn">Allow</button>
-    </aside>
-
-    <!-- TODAY -->
-    <section id="todayView" class="view">
-      <article class="hero-card">
-        <span>🔥</span><b id="streakNum">0</b>
-        <p id="streakText">Check in today to start your streak.</p>
-      </article>
-
-      <!-- THIS WEEK AGENDA -->
-      <div class="section-head"><h2>📅 This week</h2></div>
-      <div id="weekAgenda" class="week-agenda"></div>
-
-      <div class="section-head"><h2>☀️ Today's plan</h2><button class="primary small" data-open-task>+ Add</button></div>
-      <div class="quick-add">
-        <input id="quickAddToday" maxlength="120" placeholder="⚡ Quick add — e.g. Call mom tomorrow 5pm" />
-        <button type="button" id="quickAddTodayBtn" class="primary small">Add</button>
+    <!-- WELCOME -->
+    <section id="welcome" class="welcome hidden">
+      <div class="logo big">🌼</div>
+      <h1>Daysie</h1>
+      <p>
+        Your gentle family helper for reminders, reflections, and growing one
+        day at a time.
+      </p>
+      <div class="welcome-grid">
+        <article>
+          <b>⏰ Friendly reminders</b
+          ><span>Set a task, time, repeat, and priority.</span>
+        </article>
+        <article>
+          <b>📖 Cozy journal</b
+          ><span>Track moods, prompts, tags, and memories.</span>
+        </article>
+        <article>
+          <b>👨‍👩‍👧 Family linking</b
+          ><span>Link accounts to share tasks &amp; lists.</span>
+        </article>
+        <article>
+          <b>☁️ Sync across devices</b
+          ><span>Optional account keeps everything in sync.</span>
+        </article>
       </div>
-      <div id="todayTasks"></div>
-
-      <div class="section-head"><h2>🌱 Habits</h2><button id="manageHabitsBtn" class="soft small" type="button">Manage</button></div>
-      <div id="habitsList" class="habits-list"></div>
-
-      <div class="section-head"><h2>📝 Shared lists</h2><button id="manageListsBtn" class="soft small" type="button">Manage</button></div>
-      <div id="listsList" class="lists-list"></div>
-
-      <!-- FROM FAMILY (assigned tasks & reminders sent to me) -->
-      <div id="familyInboxSection" class="hidden">
-        <div class="section-head"><h2>📬 From family</h2></div>
-        <div id="familyInbox"></div>
-      </div>
-
-      <!-- FAMILY LISTS (shared across linked accounts) -->
-
-      <!-- ON THIS DAY -->
-      <div id="onThisDaySection" class="hidden">
-        <div class="section-head"><h2>🕰️ On this day</h2></div>
-        <div id="onThisDayList"></div>
-      </div>
-
-      <article class="card center">
-        <h2>💫 A little moment</h2>
-        <p id="dailyQuote"></p>
-        <button class="soft small" data-tab="journal">Write in journal ✍️</button>
-      </article>
+      <input
+        id="nameInput"
+        maxlength="24"
+        placeholder="What should Daysie call you?"
+      />
+      <button id="startBtn" class="primary wide">Let's begin ✨</button>
     </section>
 
-    <!-- TASKS -->
-    <section id="tasksView" class="view hidden">
-      <div class="section-head">
-        <h2>⏰ Reminders & tasks</h2>
-        <button class="primary small" data-open-task>+ Add</button>
-      </div>
-      <div class="quick-add">
-        <input id="quickAddTasks" maxlength="120" placeholder="⚡ Quick add — e.g. Pay rent on the 1st, water plants daily" />
-        <button type="button" id="quickAddTasksBtn" class="primary small">Add</button>
-      </div>
-      <div class="filter-bar">
-        <button class="chip-filter active" data-filter="all">All</button>
-        <button class="chip-filter" data-filter="today">Today</button>
-        <button class="chip-filter" data-filter="high">🌸 Important</button>
-        <button class="chip-filter" data-filter="birthday">🎂 Birthdays</button>
-      </div>
-      <div id="taskList"></div>
-    </section>
-
-    <!-- CALENDAR -->
-    <section id="calendarView" class="view hidden">
-      <div class="cal-header">
-        <button id="calPrev" class="icon-btn">◀</button>
-        <h2 id="calTitle"></h2>
-        <button id="calNext" class="icon-btn">▶</button>
-      </div>
-      <div id="calGrid" class="cal-grid"></div>
-      <div id="calDayDetail" class="cal-day-detail hidden"></div>
-    </section>
-
-    <!-- JOURNAL -->
-    <section id="journalView" class="view hidden">
-      <h2>📖 How are you today?</h2>
-      <article class="card">
-        <div id="moodPicker" class="moods"></div>
-        <div class="prompt">
-          <small>✨ Today's prompt</small>
-          <b id="promptText"></b>
-          <button id="nextPrompt" class="soft tiny">Try another</button>
-        </div>
-        <textarea id="journalText" placeholder="Write freely — one sentence counts..."></textarea>
-        <!-- Photo attachment -->
-        <label class="photo-label">
-          <input type="file" id="photoInput" accept="image/*" multiple />
-          <span>📷 Add photos</span>
-        </label>
-        <div id="photoPreview" class="photo-preview"></div>
-        <p class="label">Tag this moment</p>
-        <div id="tagPicker" class="chips"></div>
-        <button id="saveEntry" class="primary wide">Save entry 💛</button>
-      </article>
-      <div class="section-head">
-        <h2>📚 Your journal</h2>
-        <input id="searchEntries" placeholder="Search..." style="max-width:160px" />
-      </div>
-      <div id="entryTagFilter" class="filter-bar"></div>
-      <div id="entries"></div>
-    </section>
-
-    <!-- INSIGHTS -->
-    <section id="insightsView" class="view hidden">
-      <h2>🌈 Your insights</h2>
-      <div id="stats" class="stats"></div>
-      <article class="card"><h2>😊 Mood this week</h2><div id="moodBars" class="bars"></div></article>
-      <article class="card"><h2>📈 Mood this month</h2><div id="moodTrend" class="mood-trend"></div></article>
-      <article class="card"><h2>🌱 Habit streaks</h2><div id="habitInsights" class="habit-insights"></div></article>
-      <article class="card"><h2>🏅 Little wins</h2><div id="badges"></div></article>
-      <div class="row" style="margin-top:12px">
-        <button id="exportBtn" class="soft">⬇️ Export JSON</button>
-        <button id="exportPdfBtn" class="soft">📄 Export PDF</button>
-      </div>
-    </section>
-  </main>
-
-  <button id="fab" class="fab hidden" data-open-task>+</button>
-  <nav id="tabs" class="tabs hidden">
-    <button class="active" data-tab="today">☀️<span>Today</span></button>
-    <button data-tab="tasks">⏰<span>Tasks</span></button>
-    <button data-tab="calendar">📅<span>Calendar</span></button>
-    <button data-tab="journal">📖<span>Journal</span></button>
-    <button data-tab="insights">🌈<span>Insights</span></button>
-  </nav>
-
-  <!-- TASK DIALOG -->
-  <dialog id="taskDialog">
-    <div class="modal" id="taskForm">
-      <div class="modal-head">
-        <h2 id="dialogTitle">⏰ New reminder</h2>
-        <button type="button" id="closeTaskTop" class="modal-close" title="Close" aria-label="Close">✕</button>
-      </div>
-      <label>What do you need to do?
-        <input id="taskTitle" required maxlength="120" placeholder="e.g. Take medicine, Call Grandma" />
-      </label>
-      <p class="label">Category</p>
-      <div id="categoryPicker" class="chips"></div>
-      <p class="label">Assign to</p>
-      <div id="assigneePicker" class="chips"></div>
-      <div class="row">
-        <label>Day<input id="taskDate" type="date" /></label>
-        <label>Time<input id="taskTime" type="time" /></label>
-      </div>
-      <p class="label">Priority</p>
-      <div id="priorityPicker" class="chips">
-        <button type="button" data-priority="low">🌿 Easy</button>
-        <button type="button" data-priority="med">⭐ Normal</button>
-        <button type="button" data-priority="high">🌸 Important</button>
-      </div>
-      <p class="label">Repeat</p>
-      <div id="repeatPicker" class="chips">
-        <button type="button" data-repeat="none">Once</button>
-        <button type="button" data-repeat="daily">Daily</button>
-        <button type="button" data-repeat="weekly">Weekly</button>
-        <button type="button" data-repeat="monthly">Monthly</button>
-        <button type="button" data-repeat="yearly">Yearly 🎂</button>
-      </div>
-      <div id="repeatUntilWrap" class="hidden">
-        <p class="label">Repeat until (optional)</p>
-        <input id="taskRepeatUntil" type="date" />
-      </div>
-      <label>Notes<textarea id="taskNote" placeholder="Optional details..."></textarea></label>
-      <p class="label">Subtasks / checklist</p>
-      <div id="subtaskList" class="subtask-edit-list"></div>
-      <div class="subtask-add-row">
-        <input id="subtaskInput" maxlength="80" placeholder="Add a step..." />
-        <button type="button" id="addSubtaskBtn" class="soft small">+ Add</button>
-      </div>
-      <div class="row modal-actions">
-        <button type="button" id="cancelTaskBtn" class="soft">Cancel</button>
-        <button type="button" id="saveTaskBtn" class="primary">Save reminder</button>
-      </div>
-    </div>
-  </dialog>
-
-  <!-- JOURNAL EDIT DIALOG -->
-  <dialog id="editEntryDialog">
-    <div class="modal">
-      <h2>✏️ Edit entry</h2>
-      <div id="editMoodPicker" class="moods"></div>
-      <textarea id="editEntryText" style="min-height:120px"></textarea>
-      <p class="label">Photos</p>
-      <div id="editPhotos" class="photo-preview edit-photos"></div>
-      <div class="row modal-actions">
-        <button type="button" id="cancelEditEntry" class="soft">Cancel</button>
-        <button type="button" id="saveEditEntry" class="primary">Save changes</button>
-      </div>
-    </div>
-  </dialog>
-
-  <!-- CONFIRM DIALOG -->
-  <dialog id="confirmDialog">
-    <div class="modal" style="text-align:center">
-      <div style="font-size:40px" id="confirmIcon">🗑️</div>
-      <h2 id="confirmTitle">Are you sure?</h2>
-      <p id="confirmMsg" style="color:var(--soft)"></p>
-      <div class="row modal-actions">
-        <button type="button" id="confirmNo" class="soft">Cancel</button>
-        <button type="button" id="confirmYes" class="primary" style="background:linear-gradient(135deg,#ff8c9a,#ff5f76)">Delete</button>
-      </div>
-    </div>
-  </dialog>
-
-  <!-- FAMILY MODAL -->
-  <dialog id="familyDialog">
-    <div class="modal">
-      <div class="modal-head">
-        <h2>👨‍👩‍👧 Family</h2>
-        <button type="button" id="closeFamilyDialog" class="modal-close" title="Close" aria-label="Close">✕</button>
-      </div>
-
-      <div id="familySyncGate" class="hidden">
-        <p style="color:var(--soft);font-weight:700">Turn on sync first to link family members. Open Settings → ☁️ Turn on sync, then come back here.</p>
-      </div>
-
-      <div id="familyBody">
-        <h3>🙂 Your profile</h3>
-        <label>Your name<input id="famMeName" maxlength="20" placeholder="e.g. Mom, Dad, Alex" /></label>
-        <p class="label">Icon</p>
-        <div id="famEmojiPicker" class="profile-emojis"></div>
-        <p class="label">Color</p>
-        <div id="famColorPicker" class="profile-colors"></div>
-        <button type="button" id="famSaveMeBtn" class="soft wide" style="margin-top:8px">Save my profile</button>
-
-        <hr style="border-color:var(--line);margin:16px 0" />
-        <h3>👪 Your family</h3>
-        <div id="familyMembers" class="family-members"></div>
-        <div class="row" style="margin-top:10px">
-          <button type="button" id="famInviteBtn" class="primary">➕ Invite a member</button>
-          <button type="button" id="familyLeaveBtn" class="soft hidden">Leave family</button>
-        </div>
-        <div id="famInviteWrap" class="hidden" style="margin-top:10px">
-          <p style="color:var(--soft)">Share this code. On their device: Family → Join with a code.</p>
-          <div id="famInviteCode" class="pair-code"></div>
-          <p id="famInviteExpiry" style="text-align:center;color:var(--soft);font-size:.85rem"></p>
-        </div>
-
-        <hr style="border-color:var(--line);margin:16px 0" />
-        <h3>🔗 Join a family</h3>
-        <label>Enter a family member's code
-          <input id="famJoinCode" maxlength="7" placeholder="AB12CD" autocomplete="off" autocapitalize="characters" style="text-align:center;letter-spacing:.3em;font-size:1.3rem;text-transform:uppercase" />
-        </label>
-        <button type="button" id="famJoinBtn" class="primary wide" style="margin-top:6px">Join family 🔗</button>
-
-        <hr style="border-color:var(--line);margin:16px 0" />
-        <h3>🔔 Send a reminder</h3>
-        <label>To<select id="remindMember" class="fam-select"></select></label>
-        <label>Reminder<input id="remindText" maxlength="80" placeholder="e.g. Take your medicine" /></label>
-        <label>When (optional)<input id="remindWhen" type="datetime-local" /></label>
-        <button type="button" id="famRemindBtn" class="soft wide" style="margin-top:6px">Send reminder 🔔</button>
-      </div>
-
-      <button type="button" id="closeFamily" class="soft wide" style="margin-top:14px">Done</button>
-    </div>
-  </dialog>
-
-  <!-- SETTINGS MODAL -->
-  <dialog id="settingsDialog">
-    <div class="modal">
-      <div class="modal-head">
-        <h2>⚙️ Settings</h2>
-        <button type="button" id="closeSettingsTop" class="modal-close" title="Close" aria-label="Close">✕</button>
-      </div>
-
-      <p class="label">Theme</p>
-      <div class="chips" id="themePicker">
-        <button type="button" data-theme="light">☀️ Light</button>
-        <button type="button" data-theme="dark">🌙 Dark</button>
-        <button type="button" data-theme="hc">⬛ High contrast</button>
-      </div>
-
-      <p class="label">Text size</p>
-      <div class="chips" id="fontPicker">
-        <button type="button" data-font="normal">Aa Normal</button>
-        <button type="button" data-font="large">Aa Large</button>
-        <button type="button" data-font="xl">Aa Extra large</button>
-      </div>
-
-      <hr style="border-color:var(--line);margin:18px 0" />
-
-      <h3>☁️ Sync & account</h3>
-      <div id="accountSection">
-        <div id="loggedOutSection">
-          <p style="color:var(--soft)">Sync Daysie across your devices — no email, no password. Turn on sync here, then link your other devices with a short code.</p>
-          <button type="button" id="enableSyncBtn" class="primary wide">☁️ Turn on sync</button>
-          <div style="text-align:center;margin:10px 0;color:var(--soft)">— or —</div>
-          <button type="button" id="haveCodeBtn" class="soft wide">🔢 I have a code from another device</button>
-          <div id="enterCodeSection" class="hidden" style="margin-top:12px">
-            <label>Enter the code shown on your other device
-              <input id="pairCodeInput" maxlength="7" placeholder="AB12CD" autocomplete="off" autocapitalize="characters" style="text-align:center;letter-spacing:.3em;font-size:1.4rem;text-transform:uppercase" />
-            </label>
-            <button type="button" id="redeemCodeBtn" class="primary wide">Connect this device 🔗</button>
-            <p id="redeemStatus" class="hidden" style="margin-top:8px;color:var(--soft);text-align:center"></p>
+    <!-- MAIN APP -->
+    <main id="app" class="app hidden">
+      <header class="topbar">
+        <div class="brand">
+          <div class="logo">🌼</div>
+          <div>
+            <h1>Daysie</h1>
+            <p>remember · reflect · grow</p>
           </div>
         </div>
-        <div id="loggedInSection" class="hidden">
-          <div class="account-card">
-            <span>☁️</span>
-            <div>
-              <b>Sync is on</b>
-              <small>Synced across your linked devices</small>
-              <small id="deviceUserId">Account connected</small>
+        <div class="topbar-right">
+          <button id="profileBtn" class="profile-btn" title="Family">
+            <span id="profileEmoji">🌼</span><span id="profileName">Me</span>
+          </button>
+          <button id="settingsBtn" class="icon-btn" title="Settings">⚙️</button>
+        </div>
+      </header>
+
+      <div class="sub-header">
+        <div><b id="helloText">Hi!</b><span id="dateText"></span></div>
+        <div id="syncStatus" class="sync-status hidden"></div>
+      </div>
+
+      <aside id="notifyBanner" class="banner hidden">
+        <span>🔔</span>
+        <p>
+          <b>Turn on reminders</b
+          ><small>Allow notifications so Daysie can nudge you on time.</small>
+        </p>
+        <button id="notifyBtn">Allow</button>
+      </aside>
+
+      <!-- TODAY -->
+      <section id="todayView" class="view">
+        <article class="hero-card">
+          <span>🔥</span><b id="streakNum">0</b>
+          <p id="streakText">Check in today to start your streak.</p>
+        </article>
+
+        <!-- THIS WEEK AGENDA -->
+        <div class="section-head"><h2>📅 This week</h2></div>
+        <div id="weekAgenda" class="week-agenda"></div>
+
+        <div class="section-head">
+          <h2>☀️ Today's plan</h2>
+          <button class="primary small" data-open-task>+ Add</button>
+        </div>
+        <div class="quick-add">
+          <input
+            id="quickAddToday"
+            maxlength="120"
+            placeholder="⚡ Quick add — e.g. Call mom tomorrow 5pm"
+          />
+          <button type="button" id="quickAddTodayBtn" class="primary small">
+            Add
+          </button>
+        </div>
+        <div id="todayTasks"></div>
+
+        <div class="section-head">
+          <h2>🌱 Habits</h2>
+          <button id="manageHabitsBtn" class="soft small" type="button">
+            Manage
+          </button>
+        </div>
+        <div id="habitsList" class="habits-list"></div>
+
+        <div class="section-head">
+          <h2>📝 Shared lists</h2>
+          <button id="manageListsBtn" class="soft small" type="button">
+            Manage
+          </button>
+        </div>
+        <div id="listsList" class="lists-list"></div>
+
+        <!-- FROM FAMILY (assigned tasks & reminders sent to me) -->
+        <div id="familyInboxSection" class="hidden">
+          <div class="section-head"><h2>📬 From family</h2></div>
+          <div id="familyInbox"></div>
+        </div>
+
+        <!-- FAMILY LISTS (shared across linked accounts) -->
+
+        <!-- ON THIS DAY -->
+        <div id="onThisDaySection" class="hidden">
+          <div class="section-head"><h2>🕰️ On this day</h2></div>
+          <div id="onThisDayList"></div>
+        </div>
+
+        <article class="card center">
+          <h2>💫 A little moment</h2>
+          <p id="dailyQuote"></p>
+          <button class="soft small" data-tab="journal">
+            Write in journal ✍️
+          </button>
+        </article>
+      </section>
+
+      <!-- TASKS -->
+      <section id="tasksView" class="view hidden">
+        <div class="section-head">
+          <h2>⏰ Reminders & tasks</h2>
+          <button class="primary small" data-open-task>+ Add</button>
+        </div>
+        <div class="quick-add">
+          <input
+            id="quickAddTasks"
+            maxlength="120"
+            placeholder="⚡ Quick add — e.g. Pay rent on the 1st, water plants daily"
+          />
+          <button type="button" id="quickAddTasksBtn" class="primary small">
+            Add
+          </button>
+        </div>
+        <div class="filter-bar">
+          <button class="chip-filter active" data-filter="all">All</button>
+          <button class="chip-filter" data-filter="today">Today</button>
+          <button class="chip-filter" data-filter="high">🌸 Important</button>
+          <button class="chip-filter" data-filter="birthday">
+            🎂 Birthdays
+          </button>
+        </div>
+        <div id="taskList"></div>
+      </section>
+
+      <!-- CALENDAR -->
+      <section id="calendarView" class="view hidden">
+        <div class="cal-header">
+          <button id="calPrev" class="icon-btn">◀</button>
+          <h2 id="calTitle"></h2>
+          <button id="calNext" class="icon-btn">▶</button>
+        </div>
+        <div id="calGrid" class="cal-grid"></div>
+        <div id="calDayDetail" class="cal-day-detail hidden"></div>
+      </section>
+
+      <!-- JOURNAL -->
+      <section id="journalView" class="view hidden">
+        <h2>📖 How are you today?</h2>
+        <article class="card">
+          <div id="moodPicker" class="moods"></div>
+          <div class="prompt">
+            <small>✨ Today's prompt</small>
+            <b id="promptText"></b>
+            <button id="nextPrompt" class="soft tiny">Try another</button>
+          </div>
+          <textarea
+            id="journalText"
+            placeholder="Write freely — one sentence counts..."
+          ></textarea>
+          <!-- Photo attachment -->
+          <label class="photo-label">
+            <input type="file" id="photoInput" accept="image/*" multiple />
+            <span>📷 Add photos</span>
+          </label>
+          <div id="photoPreview" class="photo-preview"></div>
+          <p class="label">Tag this moment</p>
+          <div id="tagPicker" class="chips"></div>
+          <button id="saveEntry" class="primary wide">Save entry 💛</button>
+        </article>
+        <div class="section-head">
+          <h2>📚 Your journal</h2>
+          <input
+            id="searchEntries"
+            placeholder="Search..."
+            style="max-width: 160px"
+          />
+        </div>
+        <div id="entryTagFilter" class="filter-bar"></div>
+        <div id="entries"></div>
+      </section>
+
+      <!-- INSIGHTS -->
+      <section id="insightsView" class="view hidden">
+        <h2>🌈 Your insights</h2>
+        <div id="stats" class="stats"></div>
+        <article class="card">
+          <h2>😊 Mood this week</h2>
+          <div id="moodBars" class="bars"></div>
+        </article>
+        <article class="card">
+          <h2>📈 Mood this month</h2>
+          <div id="moodTrend" class="mood-trend"></div>
+        </article>
+        <article class="card">
+          <h2>🌱 Habit streaks</h2>
+          <div id="habitInsights" class="habit-insights"></div>
+        </article>
+        <article class="card">
+          <h2>🏅 Little wins</h2>
+          <div id="badges"></div>
+        </article>
+        <div class="row" style="margin-top: 12px">
+          <button id="exportBtn" class="soft">⬇️ Export JSON</button>
+          <button id="exportPdfBtn" class="soft">📄 Export PDF</button>
+        </div>
+      </section>
+    </main>
+
+    <button id="fab" class="fab hidden" data-open-task>+</button>
+    <nav id="tabs" class="tabs hidden">
+      <button class="active" data-tab="today">☀️<span>Today</span></button>
+      <button data-tab="tasks">⏰<span>Tasks</span></button>
+      <button data-tab="calendar">📅<span>Calendar</span></button>
+      <button data-tab="journal">📖<span>Journal</span></button>
+      <button data-tab="insights">🌈<span>Insights</span></button>
+    </nav>
+
+    <!-- TASK DIALOG -->
+    <dialog id="taskDialog">
+      <div class="modal" id="taskForm">
+        <div class="modal-head">
+          <h2 id="dialogTitle">⏰ New reminder</h2>
+          <button
+            type="button"
+            id="closeTaskTop"
+            class="modal-close"
+            title="Close"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+        <label
+          >What do you need to do?
+          <input
+            id="taskTitle"
+            required
+            maxlength="120"
+            placeholder="e.g. Take medicine, Call Grandma"
+          />
+        </label>
+        <p class="label">Category</p>
+        <div id="categoryPicker" class="chips"></div>
+        <p class="label">Assign to</p>
+        <div id="assigneePicker" class="chips"></div>
+        <div class="row">
+          <label>Day<input id="taskDate" type="date" /></label>
+          <label>Time<input id="taskTime" type="time" /></label>
+        </div>
+        <p class="label">Priority</p>
+        <div id="priorityPicker" class="chips">
+          <button type="button" data-priority="low">🌿 Easy</button>
+          <button type="button" data-priority="med">⭐ Normal</button>
+          <button type="button" data-priority="high">🌸 Important</button>
+        </div>
+        <p class="label">Repeat</p>
+        <div id="repeatPicker" class="chips">
+          <button type="button" data-repeat="none">Once</button>
+          <button type="button" data-repeat="daily">Daily</button>
+          <button type="button" data-repeat="weekly">Weekly</button>
+          <button type="button" data-repeat="monthly">Monthly</button>
+          <button type="button" data-repeat="yearly">Yearly 🎂</button>
+        </div>
+        <div id="repeatUntilWrap" class="hidden">
+          <p class="label">Repeat until (optional)</p>
+          <input id="taskRepeatUntil" type="date" />
+        </div>
+        <label
+          >Notes<textarea
+            id="taskNote"
+            placeholder="Optional details..."
+          ></textarea>
+        </label>
+        <p class="label">Subtasks / checklist</p>
+        <div id="subtaskList" class="subtask-edit-list"></div>
+        <div class="subtask-add-row">
+          <input id="subtaskInput" maxlength="80" placeholder="Add a step..." />
+          <button type="button" id="addSubtaskBtn" class="soft small">
+            + Add
+          </button>
+        </div>
+        <div class="row modal-actions">
+          <button type="button" id="cancelTaskBtn" class="soft">Cancel</button>
+          <button type="button" id="saveTaskBtn" class="primary">
+            Save reminder
+          </button>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- JOURNAL EDIT DIALOG -->
+    <dialog id="editEntryDialog">
+      <div class="modal">
+        <h2>✏️ Edit entry</h2>
+        <div id="editMoodPicker" class="moods"></div>
+        <textarea id="editEntryText" style="min-height: 120px"></textarea>
+        <p class="label">Photos</p>
+        <div id="editPhotos" class="photo-preview edit-photos"></div>
+        <div class="row modal-actions">
+          <button type="button" id="cancelEditEntry" class="soft">
+            Cancel
+          </button>
+          <button type="button" id="saveEditEntry" class="primary">
+            Save changes
+          </button>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- CONFIRM DIALOG -->
+    <dialog id="confirmDialog">
+      <div class="modal" style="text-align: center">
+        <div style="font-size: 40px" id="confirmIcon">🗑️</div>
+        <h2 id="confirmTitle">Are you sure?</h2>
+        <p id="confirmMsg" style="color: var(--soft)"></p>
+        <div class="row modal-actions">
+          <button type="button" id="confirmNo" class="soft">Cancel</button>
+          <button
+            type="button"
+            id="confirmYes"
+            class="primary"
+            style="background: linear-gradient(135deg, #ff8c9a, #ff5f76)"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- FAMILY MODAL -->
+    <dialog id="familyDialog">
+      <div class="modal">
+        <div class="modal-head">
+          <h2>👨‍👩‍👧 Family</h2>
+          <button
+            type="button"
+            id="closeFamilyDialog"
+            class="modal-close"
+            title="Close"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div id="familySyncGate" class="hidden">
+          <p style="color: var(--soft); font-weight: 700">
+            Turn on sync first to link family members. Open Settings → ☁️ Turn
+            on sync, then come back here.
+          </p>
+        </div>
+
+        <div id="familyBody">
+          <h3>🙂 Your profile</h3>
+          <label
+            >Your name<input
+              id="famMeName"
+              maxlength="20"
+              placeholder="e.g. Mom, Dad, Alex"
+          /></label>
+          <p class="label">Icon</p>
+          <div id="famEmojiPicker" class="profile-emojis"></div>
+          <p class="label">Color</p>
+          <div id="famColorPicker" class="profile-colors"></div>
+          <button
+            type="button"
+            id="famSaveMeBtn"
+            class="soft wide"
+            style="margin-top: 8px"
+          >
+            Save my profile
+          </button>
+
+          <hr style="border-color: var(--line); margin: 16px 0" />
+          <h3>👪 Your family</h3>
+          <div id="familyMembers" class="family-members"></div>
+          <div class="row" style="margin-top: 10px">
+            <button type="button" id="famInviteBtn" class="primary">
+              ➕ Invite a member
+            </button>
+            <button type="button" id="familyLeaveBtn" class="soft hidden">
+              Leave family
+            </button>
+          </div>
+          <div id="famInviteWrap" class="hidden" style="margin-top: 10px">
+            <p style="color: var(--soft)">
+              Share this code. On their device: Family → Join with a code.
+            </p>
+            <div id="famInviteCode" class="pair-code"></div>
+            <p
+              id="famInviteExpiry"
+              style="text-align: center; color: var(--soft); font-size: 0.85rem"
+            ></p>
+          </div>
+
+          <hr style="border-color: var(--line); margin: 16px 0" />
+          <h3>🔗 Join a family</h3>
+          <label
+            >Enter a family member's code
+            <input
+              id="famJoinCode"
+              maxlength="7"
+              placeholder="AB12CD"
+              autocomplete="off"
+              autocapitalize="characters"
+              style="
+                text-align: center;
+                letter-spacing: 0.3em;
+                font-size: 1.3rem;
+                text-transform: uppercase;
+              "
+            />
+          </label>
+          <button
+            type="button"
+            id="famJoinBtn"
+            class="primary wide"
+            style="margin-top: 6px"
+          >
+            Join family 🔗
+          </button>
+
+          <hr style="border-color: var(--line); margin: 16px 0" />
+          <h3>🔔 Send a reminder</h3>
+          <label
+            >To<select id="remindMember" class="fam-select"></select
+          ></label>
+          <label
+            >Reminder<input
+              id="remindText"
+              maxlength="80"
+              placeholder="e.g. Take your medicine"
+          /></label>
+          <label
+            >When (optional)<input id="remindWhen" type="datetime-local"
+          /></label>
+          <button
+            type="button"
+            id="famRemindBtn"
+            class="soft wide"
+            style="margin-top: 6px"
+          >
+            Send reminder 🔔
+          </button>
+        </div>
+
+        <button
+          type="button"
+          id="closeFamily"
+          class="soft wide"
+          style="margin-top: 14px"
+        >
+          Done
+        </button>
+      </div>
+    </dialog>
+
+    <!-- SETTINGS MODAL -->
+    <dialog id="settingsDialog">
+      <div class="modal">
+        <div class="modal-head">
+          <h2>⚙️ Settings</h2>
+          <button
+            type="button"
+            id="closeSettingsTop"
+            class="modal-close"
+            title="Close"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+
+        <p class="label">Theme</p>
+        <div class="chips" id="themePicker">
+          <button type="button" data-theme="light">☀️ Light</button>
+          <button type="button" data-theme="dark">🌙 Dark</button>
+          <button type="button" data-theme="hc">⬛ High contrast</button>
+        </div>
+
+        <p class="label">Text size</p>
+        <div class="chips" id="fontPicker">
+          <button type="button" data-font="normal">Aa Normal</button>
+          <button type="button" data-font="large">Aa Large</button>
+          <button type="button" data-font="xl">Aa Extra large</button>
+        </div>
+
+        <hr style="border-color: var(--line); margin: 18px 0" />
+
+        <h3>☁️ Sync & account</h3>
+        <div id="accountSection">
+          <div id="loggedOutSection">
+            <p style="color: var(--soft)">
+              Sync Daysie across your devices — no email, no password. Turn on
+              sync here, then link your other devices with a short code.
+            </p>
+            <button type="button" id="enableSyncBtn" class="primary wide">
+              ☁️ Turn on sync
+            </button>
+            <div style="text-align: center; margin: 10px 0; color: var(--soft)">
+              — or —
+            </div>
+            <button type="button" id="haveCodeBtn" class="soft wide">
+              🔢 I have a code from another device
+            </button>
+            <div id="enterCodeSection" class="hidden" style="margin-top: 12px">
+              <label
+                >Enter the code shown on your other device
+                <input
+                  id="pairCodeInput"
+                  maxlength="7"
+                  placeholder="AB12CD"
+                  autocomplete="off"
+                  autocapitalize="characters"
+                  style="
+                    text-align: center;
+                    letter-spacing: 0.3em;
+                    font-size: 1.4rem;
+                    text-transform: uppercase;
+                  "
+                />
+              </label>
+              <button type="button" id="redeemCodeBtn" class="primary wide">
+                Connect this device 🔗
+              </button>
+              <p
+                id="redeemStatus"
+                class="hidden"
+                style="margin-top: 8px; color: var(--soft); text-align: center"
+              ></p>
             </div>
           </div>
-          <button type="button" id="linkDeviceBtn" class="primary wide" style="margin:8px 0">➕ Link another device</button>
-          <div id="linkCodeSection" class="hidden" style="margin:4px 0 8px">
-            <p style="color:var(--soft)">On your other device, open Daysie → Settings → “I have a code” and enter:</p>
-            <div id="linkCodeDisplay" style="text-align:center;font-size:2rem;letter-spacing:.3em;font-weight:800"></div>
-            <p id="linkCodeExpiry" style="text-align:center;color:var(--soft);font-size:.85rem;margin:4px 0"></p>
-            <p style="text-align:center;color:var(--soft)">Waiting for the other device…</p>
+          <div id="loggedInSection" class="hidden">
+            <div class="account-card">
+              <span>☁️</span>
+              <div>
+                <b>Sync is on</b>
+                <small>Synced across your linked devices</small>
+                <small id="deviceUserId">Account connected</small>
+              </div>
+            </div>
+            <button
+              type="button"
+              id="linkDeviceBtn"
+              class="primary wide"
+              style="margin: 8px 0"
+            >
+              ➕ Link another device
+            </button>
+            <div id="linkCodeSection" class="hidden" style="margin: 4px 0 8px">
+              <p style="color: var(--soft)">
+                On your other device, open Daysie → Settings → “I have a code”
+                and enter:
+              </p>
+              <div
+                id="linkCodeDisplay"
+                style="
+                  text-align: center;
+                  font-size: 2rem;
+                  letter-spacing: 0.3em;
+                  font-weight: 800;
+                "
+              ></div>
+              <p
+                id="linkCodeExpiry"
+                style="
+                  text-align: center;
+                  color: var(--soft);
+                  font-size: 0.85rem;
+                  margin: 4px 0;
+                "
+              ></p>
+              <p style="text-align: center; color: var(--soft)">
+                Waiting for the other device…
+              </p>
+            </div>
+            <button
+              type="button"
+              id="syncNowBtn"
+              class="soft wide"
+              style="margin: 8px 0"
+            >
+              🔄 Sync now
+            </button>
+            <button
+              type="button"
+              id="revokeOtherDevicesBtn"
+              class="soft wide"
+              style="margin: 8px 0"
+            >
+              🔒 Log out other devices
+            </button>
+            <button type="button" id="signOutBtn" class="soft wide">
+              Turn off sync on this device
+            </button>
           </div>
-          <button type="button" id="syncNowBtn" class="soft wide" style="margin:8px 0">🔄 Sync now</button>
-          <button type="button" id="revokeOtherDevicesBtn" class="soft wide" style="margin:8px 0">🔒 Log out other devices</button>
-          <button type="button" id="signOutBtn" class="soft wide">Turn off sync on this device</button>
+        </div>
+
+        <hr style="border-color: var(--line); margin: 18px 0" />
+
+        <p class="label">Push notifications (real, even when closed)</p>
+        <div id="pushSection">
+          <button type="button" id="subscribePushBtn" class="soft wide">
+            🔔 Enable push notifications
+          </button>
+        </div>
+
+        <hr style="border-color: var(--line); margin: 18px 0" />
+        <button type="button" id="replayTourBtn" class="soft wide">
+          🧭 Replay welcome tour
+        </button>
+
+        <button
+          type="button"
+          id="closeSettings"
+          class="soft wide"
+          style="margin-top: 16px"
+        >
+          Close
+        </button>
+      </div>
+    </dialog>
+
+    <!-- SNOOZE DIALOG -->
+    <dialog id="snoozeDialog">
+      <div class="modal">
+        <div class="modal-head">
+          <h2>😴 Snooze reminder</h2>
+          <button
+            type="button"
+            id="closeSnoozeTop"
+            class="modal-close"
+            title="Close"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+        <p style="color: var(--soft); font-weight: 700">
+          When should Daysie remind you again?
+        </p>
+        <div class="chips snooze-options">
+          <button type="button" data-snooze-min="10">⏱️ 10 minutes</button>
+          <button type="button" data-snooze-min="60">🕐 1 hour</button>
+          <button type="button" data-snooze-min="180">🕒 3 hours</button>
+          <button type="button" data-snooze-tomorrow="1">
+            🌅 Tomorrow 9 AM
+          </button>
         </div>
       </div>
+    </dialog>
 
-      <hr style="border-color:var(--line);margin:18px 0" />
-
-      <p class="label">Push notifications (real, even when closed)</p>
-      <div id="pushSection">
-        <button type="button" id="subscribePushBtn" class="soft wide">🔔 Enable push notifications</button>
+    <!-- HABIT DIALOG -->
+    <dialog id="habitDialog">
+      <div class="modal">
+        <div class="modal-head">
+          <h2>🌱 Habits</h2>
+          <button
+            type="button"
+            id="closeHabitDialog"
+            class="modal-close"
+            title="Close"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+        <div id="habitManageList" class="manage-list"></div>
+        <hr style="border-color: var(--line); margin: 14px 0" />
+        <label
+          >New habit<input
+            id="newHabitName"
+            maxlength="40"
+            placeholder="e.g. Drink water, Walk 20 min"
+        /></label>
+        <p class="label">Icon</p>
+        <div id="habitEmojiPicker" class="profile-emojis"></div>
+        <p class="label">Color</p>
+        <div id="habitColorPicker" class="profile-colors"></div>
+        <button
+          type="button"
+          id="addHabitBtn"
+          class="primary wide"
+          style="margin-top: 10px"
+        >
+          Add habit 🌱
+        </button>
       </div>
+    </dialog>
 
-      <hr style="border-color:var(--line);margin:18px 0" />
-      <button type="button" id="replayTourBtn" class="soft wide">🧭 Replay welcome tour</button>
+    <!-- SHARED LIST DIALOG -->
+    <dialog id="listDialog">
+      <div class="modal">
+        <div class="modal-head">
+          <h2>📝 Shared lists</h2>
+          <button
+            type="button"
+            id="closeListDialog"
+            class="modal-close"
+            title="Close"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+        <div id="listManageList" class="manage-list"></div>
+        <hr style="border-color: var(--line); margin: 14px 0" />
+        <label
+          >New list<input
+            id="newListName"
+            maxlength="40"
+            placeholder="e.g. Groceries, Packing"
+        /></label>
+        <p class="label">Icon</p>
+        <div id="listEmojiPicker" class="profile-emojis"></div>
+        <button
+          type="button"
+          id="addListBtn"
+          class="primary wide"
+          style="margin-top: 10px"
+        >
+          Create list 📝
+        </button>
+      </div>
+    </dialog>
 
-      <button type="button" id="closeSettings" class="soft wide" style="margin-top:16px">Close</button>
+    <!-- ONBOARDING TOUR -->
+    <div id="tourOverlay" class="tour-overlay hidden">
+      <div class="tour-card">
+        <button type="button" id="tourSkip" class="tour-skip">Skip</button>
+        <div id="tourIcon" class="tour-icon">🌼</div>
+        <h2 id="tourTitle">Welcome</h2>
+        <p id="tourBody"></p>
+        <div id="tourDots" class="tour-dots"></div>
+        <div class="tour-actions">
+          <button type="button" id="tourBack" class="soft hidden">
+            ← Back
+          </button>
+          <button type="button" id="tourNext" class="primary">Next →</button>
+        </div>
+      </div>
     </div>
-  </dialog>
 
-  <!-- SNOOZE DIALOG -->
-  <dialog id="snoozeDialog">
-    <div class="modal">
-      <div class="modal-head">
-        <h2>😴 Snooze reminder</h2>
-        <button type="button" id="closeSnoozeTop" class="modal-close" title="Close" aria-label="Close">✕</button>
-      </div>
-      <p style="color:var(--soft);font-weight:700">When should Daysie remind you again?</p>
-      <div class="chips snooze-options">
-        <button type="button" data-snooze-min="10">⏱️ 10 minutes</button>
-        <button type="button" data-snooze-min="60">🕐 1 hour</button>
-        <button type="button" data-snooze-min="180">🕒 3 hours</button>
-        <button type="button" data-snooze-tomorrow="1">🌅 Tomorrow 9 AM</button>
-      </div>
+    <!-- PHOTO LIGHTBOX -->
+    <div
+      id="lightbox"
+      class="lightbox hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Photo viewer"
+    >
+      <button
+        type="button"
+        id="lightboxClose"
+        class="lightbox-close"
+        title="Close"
+        aria-label="Close"
+      >
+        ✕
+      </button>
+      <button
+        type="button"
+        id="lightboxShare"
+        class="lightbox-share"
+        title="Share or save"
+        aria-label="Share or save photo"
+      >
+        ⬇️
+      </button>
+      <button
+        type="button"
+        id="lightboxPrev"
+        class="lightbox-nav prev hidden"
+        aria-label="Previous photo"
+      >
+        ‹
+      </button>
+      <img id="lightboxImg" alt="Journal photo" />
+      <button
+        type="button"
+        id="lightboxNext"
+        class="lightbox-nav next hidden"
+        aria-label="Next photo"
+      >
+        ›
+      </button>
+      <div id="lightboxCount" class="lightbox-count"></div>
     </div>
-  </dialog>
 
-  <!-- HABIT DIALOG -->
-  <dialog id="habitDialog">
-    <div class="modal">
-      <div class="modal-head">
-        <h2>🌱 Habits</h2>
-        <button type="button" id="closeHabitDialog" class="modal-close" title="Close" aria-label="Close">✕</button>
-      </div>
-      <div id="habitManageList" class="manage-list"></div>
-      <hr style="border-color:var(--line);margin:14px 0" />
-      <label>New habit<input id="newHabitName" maxlength="40" placeholder="e.g. Drink water, Walk 20 min" /></label>
-      <p class="label">Icon</p>
-      <div id="habitEmojiPicker" class="profile-emojis"></div>
-      <p class="label">Color</p>
-      <div id="habitColorPicker" class="profile-colors"></div>
-      <button type="button" id="addHabitBtn" class="primary wide" style="margin-top:10px">Add habit 🌱</button>
-    </div>
-  </dialog>
-
-  <!-- SHARED LIST DIALOG -->
-  <dialog id="listDialog">
-    <div class="modal">
-      <div class="modal-head">
-        <h2>📝 Shared lists</h2>
-        <button type="button" id="closeListDialog" class="modal-close" title="Close" aria-label="Close">✕</button>
-      </div>
-      <div id="listManageList" class="manage-list"></div>
-      <hr style="border-color:var(--line);margin:14px 0" />
-      <label>New list<input id="newListName" maxlength="40" placeholder="e.g. Groceries, Packing" /></label>
-      <p class="label">Icon</p>
-      <div id="listEmojiPicker" class="profile-emojis"></div>
-      <button type="button" id="addListBtn" class="primary wide" style="margin-top:10px">Create list 📝</button>
-    </div>
-  </dialog>
-
-  <!-- ONBOARDING TOUR -->
-  <div id="tourOverlay" class="tour-overlay hidden">
-    <div class="tour-card">
-      <button type="button" id="tourSkip" class="tour-skip">Skip</button>
-      <div id="tourIcon" class="tour-icon">🌼</div>
-      <h2 id="tourTitle">Welcome</h2>
-      <p id="tourBody"></p>
-      <div id="tourDots" class="tour-dots"></div>
-      <div class="tour-actions">
-        <button type="button" id="tourBack" class="soft hidden">← Back</button>
-        <button type="button" id="tourNext" class="primary">Next →</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- PHOTO LIGHTBOX -->
-  <div id="lightbox" class="lightbox hidden" role="dialog" aria-modal="true" aria-label="Photo viewer">
-    <button type="button" id="lightboxClose" class="lightbox-close" title="Close" aria-label="Close">✕</button>
-    <button type="button" id="lightboxShare" class="lightbox-share" title="Share or save" aria-label="Share or save photo">⬇️</button>
-    <button type="button" id="lightboxPrev" class="lightbox-nav prev hidden" aria-label="Previous photo">‹</button>
-    <img id="lightboxImg" alt="Journal photo" />
-    <button type="button" id="lightboxNext" class="lightbox-nav next hidden" aria-label="Next photo">›</button>
-    <div id="lightboxCount" class="lightbox-count"></div>
-  </div>
-
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" defer></script>
-  <script src="app.js" defer></script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"
+      integrity="sha384-CI3ELBVUz9XQO+97x6nwMDPosPR5XvsxW2ua7N1Xeygeh1IxtgqtCkGfQY9WWdHu"
+      crossorigin="anonymous"
+      defer
+    ></script>
+    <script src="app.js" defer></script>
     <script defer src="app2.js"></script>
     <script defer src="app3.js"></script>
-</body>
+  </body>
 </html>

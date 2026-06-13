@@ -1,32 +1,657 @@
-const FAMILY_CACHE_KEY="daysie.family.v1",FAMILY_INBOX_DONE_KEY="daysie.familyInbox.done.v4",FAMILY_LEFT_KEY="daysie.family.leftAt.v1";function readCachedFamily(){try{const e=JSON.parse(localStorage.getItem(FAMILY_CACHE_KEY)||"null");if(e&&e.familyId&&Array.isArray(e.members))return e}catch(e){}return null}function cacheFamily(e){try{e&&e.familyId&&Array.isArray(e.members)&&e.members.length?localStorage.setItem(FAMILY_CACHE_KEY,JSON.stringify({familyId:e.familyId,members:e.members
-})):localStorage.removeItem(FAMILY_CACHE_KEY)}catch(e){}}function readDoneInboxIds(){try{return new Set(JSON.parse(localStorage.getItem(FAMILY_INBOX_DONE_KEY)||"[]"))}catch(e){return new Set}}function rememberDoneInboxId(e){try{const t=readDoneInboxIds();t.add(e),localStorage.setItem(FAMILY_INBOX_DONE_KEY,JSON.stringify([...t].slice(-250)))}catch(e){}}function markFamilyLeft(){try{localStorage.setItem(FAMILY_LEFT_KEY,String(Date.now())),localStorage.removeItem(FAMILY_CACHE_KEY)}catch(e){}}
-function clearFamilyLeft(){try{localStorage.removeItem(FAMILY_LEFT_KEY)}catch(e){}}function recentlyLeftFamily(){try{const e=Number(localStorage.getItem(FAMILY_LEFT_KEY)||0);return!!e&&Date.now()-e<3e5}catch(e){return!1}}function clearFamilyLocal(){window.family={familyId:null,members:[]},window.familyLists=[],db.lists=[],cacheFamily(null);try{save()}catch(e){}renderFamily(),"function"==typeof renderLists&&renderLists(),"function"==typeof buildAssigneePicker&&buildAssigneePicker()}!function(){
-if(document.getElementById("familyRuntimeStyles"))return;const e=document.createElement("style");e.id="familyRuntimeStyles",e.textContent="#familyDialog label,#familyDialog input,#familyDialog select{min-width:0;max-width:100%;box-sizing:border-box}#remindWhen{display:block;width:100%;max-width:100%;appearance:none;-webkit-appearance:none}",document.head.appendChild(e)}(),window.family=readCachedFamily()||{familyId:null,members:[]},window.familyInbox=[],window.familyLists=[]
-;let famNewEmoji="🌼",famNewColor="sun",familyListsLocalEditAt=0,famSeen=null,pendingInviteUntil=0,lastFamilyActivityAt=Date.now();function notifyNewMembers(e){e=e||[];const t=new Set(e.map(e=>e.userId));null!==famSeen?(e.forEach(e=>{if(e.isMe||famSeen.has(e.userId))return;const t=e.name||"Someone";if("function"==typeof toast&&toast("🎉 "+t+" joined your family!","You can now share lists and assign each other reminders."),"visible"!==document.visibilityState&&"Notification"in window&&"granted"===Notification.permission)try{
-new Notification("👨‍👩‍👧 "+t+" joined your family",{body:"Open Daysie to start sharing.",tag:"fam-join-"+e.userId})}catch(e){}}),famSeen=t):famSeen=t}function authHeaders(e){const t={Authorization:`Bearer ${settings.authToken}`};return e&&(t["Content-Type"]="application/json"),t}function meProfile(){return db.profiles&&db.profiles[0]||{name:"Me",emoji:"🌼",color:"sun"}}function colorHex(e){const t=(profileColors.find(t=>t.id===e)||{}).color
-;return t||(/^#[0-9a-fA-F]{3,8}$/.test(e||"")?e:"#ffcd57")}function inFamily(){return!!(window.family&&window.family.familyId&&(window.family.members||[]).length>1)}async function loadFamily(){if(settings.authToken||"function"!=typeof ensureAccount||await ensureAccount(),!settings.authToken)return void renderFamily();const e=!!(window.family&&window.family.familyId&&(window.family.members||[]).length);try{const t=await fetch(`${API}/family?ts=${Date.now()}`,{headers:authHeaders(),
-cache:"no-store"});if(!t.ok)return;const i=await t.json();let a={familyId:i.familyId||null,members:i.members||[]};if(!a.familyId&&!(a.members||[]).length){if(recentlyLeftFamily()||!e)return void clearFamilyLocal();{const e=await recoverCachedFamily();if(!e)return void clearFamilyLocal();a=e}}clearFamilyLeft(),window.family=a,cacheFamily(window.family),notifyNewMembers(window.family.members),renderFamily(),"function"==typeof buildAssigneePicker&&buildAssigneePicker()}catch(e){
-console.error("loadFamily",e)}}async function recoverCachedFamily(){const e=readCachedFamily();if(!e||!e.familyId||!settings.authToken)return null;try{const t=meProfile(),i=await fetch(`${API}/family/recover`,{method:"POST",headers:authHeaders(!0),body:JSON.stringify({familyId:e.familyId,name:t.name,emoji:t.emoji,color:t.color})});if(!i.ok)return null;const a=await i.json();return a.familyId?{familyId:a.familyId,members:a.members||[]}:null}catch(e){return null}}async function pushMyProfile(){
-if(!settings.authToken)return;const e=meProfile();try{await fetch(`${API}/family/profile`,{method:"POST",headers:authHeaders(!0),body:JSON.stringify({name:e.name,emoji:e.emoji,color:e.color})})}catch(e){}}function renderFamily(){const e=window.family||{members:[]},t=$("#familyMembers")
-;t&&(t.innerHTML=(e.members||[]).length?e.members.map(e=>`<div class="family-member"><div class="profile-avatar" style="background:${colorHex(e.color)}">${esc(e.emoji||"🙂")}</div><div class="profile-info"><b>${esc(e.name)}${e.isMe?" (you)":""}</b><small>${e.isMe?"This is you":"Linked account"}</small></div></div>`).join(""):'<p style="color:var(--soft);font-weight:700">No family linked yet. Invite someone below, or join with their code.</p>');const i=$("#familyLeaveBtn")
-;i&&i.classList.toggle("hidden",(e.members||[]).length<=1),renderRemindMembers(),renderFamilyInbox(),renderFamilyLists()}async function openFamilyDialog(){const e=$("#familyDialog");if(!e)return;settings.authToken||"function"!=typeof ensureAccount||await ensureAccount();const t=meProfile();famNewEmoji=t.emoji||"🌼",famNewColor=t.color||"sun";const i=$("#famMeName");i&&(i.value=t.name||"Me");const a=$("#famColorPicker")
-;a&&(a.innerHTML=profileColors.map(e=>`<button type="button" data-fcolor="${e.id}" style="background:${e.color}" class="${e.id===famNewColor?"on":""}"></button>`).join(""),$$("#famColorPicker button").forEach(e=>e.onclick=()=>{famNewColor=e.dataset.fcolor,$$("#famColorPicker button").forEach(e=>e.classList.remove("on")),e.classList.add("on")}));const n=$("#famEmojiPicker")
-;n&&(n.innerHTML=profileEmojis.map(e=>`<button type="button" data-femoji="${e}" class="${e===famNewEmoji?"on":""}">${e}</button>`).join(""),$$("#famEmojiPicker button").forEach(e=>e.onclick=()=>{famNewEmoji=e.dataset.femoji,$$("#famEmojiPicker button").forEach(e=>e.classList.remove("on")),e.classList.add("on")}));const o=$("#familySyncGate"),s=$("#familyBody");settings.authToken?(o&&o.classList.add("hidden"),s&&s.classList.remove("hidden")):(o&&o.classList.remove("hidden"),
-s&&s.classList.add("hidden")),e.showModal(),loadFamily()}function wire(e,t,i){const a=$(e);a&&(a[i||"onclick"]=t)}async function assignTaskToMember(e,t){if(!await ensureAccount())return toast("Could not assign","Sync is not ready yet. Try again.");const i=(window.family.members||[]).find(t=>t.userId===e);try{if(!(await fetch(`${API}/family/assign`,{method:"POST",headers:authHeaders(!0),body:JSON.stringify({toUser:e,task:{title:t.title,note:t.note,due:t.due,priority:t.priority,category:t.category
-}})})).ok)throw new Error("assign failed");toast("📋 Sent to "+(i?i.name:"family"),"It landed in their Daysie."),await loadFamilyInbox()}catch(e){await loadFamily(),toast("Could not assign","Check your connection and try again.")}}function renderRemindMembers(){const e=$("#remindMember");if(!e)return;const t=(window.family.members||[]).filter(e=>!e.isMe)
-;e.innerHTML=t.length?t.map(e=>`<option value="${esc(e.userId)}">${esc(e.emoji||"🙂")} ${esc(e.name)}</option>`).join(""):'<option value="">No family members yet</option>'}async function loadFamilyInbox(){if(settings.authToken&&!recentlyLeftFamily())try{const e=await fetch(`${API}/family/inbox`,{headers:authHeaders()});if(!e.ok)return;const t=await e.json(),i=readDoneInboxIds();window.familyInbox=(t.items||[]).filter(e=>!i.has(e.id)),renderFamilyInbox()}catch(e){}}function renderFamilyInbox(){
-const e=$("#familyInboxSection"),t=$("#familyInbox");if(!e||!t)return;const i=window.familyInbox||[];if(!i.length)return e.classList.add("hidden"),void(t.innerHTML="");e.classList.remove("hidden"),t.innerHTML=i.map(e=>{const t=e.from||{},i=e.payload||{},a="task"===e.kind,n=a?"📋":"🔔",o=i.due?" · "+fmt(i.due):e.fireAt?" · "+fmt(e.fireAt):""
-;return`<article class="inbox-card">\n      <div class="inbox-head"><span class="inbox-icon">${n}</span><div><b>${esc(i.title||(a?"New task":"Reminder"))}</b><small>From ${esc(t.emoji||"")} ${esc(t.name||"family")}${o}</small></div></div>\n      ${i.note?`<p class="inbox-note">${esc(i.note)}</p>`:""}\n      <div class="inbox-actions">\n        ${a?`<button type="button" class="primary small" data-inbox-accept="${e.id}">➕ Add to my tasks</button>`:`<button type="button" class="primary small" data-inbox-ack="${e.id}">👍 Got it</button>`}\n        <button type="button" class="soft small" data-inbox-dismiss="${e.id}">Dismiss</button>\n      </div>\n    </article>`
-}).join(""),$$("#familyInbox [data-inbox-accept]").forEach(e=>e.onclick=()=>acceptInboxTask(e.dataset.inboxAccept)),$$("#familyInbox [data-inbox-ack]").forEach(e=>e.onclick=()=>ackInbox(e.dataset.inboxAck)),$$("#familyInbox [data-inbox-dismiss]").forEach(e=>e.onclick=()=>ackInbox(e.dataset.inboxDismiss))}function acceptInboxTask(e){const t=(window.familyInbox||[]).find(t=>t.id===e);if(!t)return;const i=t.payload||{};getProfile().tasks.push({id:id(),done:!1,created:Date.now(),
-title:i.title||"Task",due:i.due||null,note:i.note||"",priority:i.priority||"low",repeat:"none",repeatUntil:null,category:i.category||"none",assignee:null,subtasks:[],notified:!1}),save(),renderAll(),ackInbox(e),toast("➕ Added","Saved to your reminders.")}async function ackInbox(e){rememberDoneInboxId(e),window.familyInbox=(window.familyInbox||[]).filter(t=>t.id!==e),renderFamilyInbox();try{await fetch(`${API}/family/inbox/ack`,{method:"POST",headers:authHeaders(!0),body:JSON.stringify({id:e,
-status:"done"})})}catch(e){}}async function loadFamilyLists(){if(recentlyLeftFamily())return window.familyLists=[],db.lists=[],void("function"==typeof renderLists&&renderLists());if(settings.authToken&&window.family.familyId&&!(familyListsLocalEditAt&&Date.now()-familyListsLocalEditAt<6e3))try{const e=await fetch(`${API}/family/lists?ts=${Date.now()}`,{headers:authHeaders(),cache:"no-store"});if(!e.ok)return;const t=await e.json();window.familyLists=t.lists||[],db.lists=window.familyLists,
-"function"==typeof renderLists&&renderLists()}catch(e){}}async function saveFamilyLists(e){if(!recentlyLeftFamily()&&settings.authToken&&window.family.familyId){familyListsLocalEditAt=Date.now(),lastFamilyActivityAt=Date.now(),window.familyLists=db.lists||window.familyLists||[];try{const t=await fetch(`${API}/family/lists`,{method:"PUT",headers:authHeaders(!0),body:JSON.stringify({lists:window.familyLists,action:e||"updated a shared list"})});if(t.ok){const e=await t.json().catch(()=>({}))
-;e.updated&&(window.familyListsUpdated=e.updated)}else"function"==typeof toast&&toast("Could not sync list","Check your connection and try again.")}catch(e){"function"==typeof toast&&toast("Could not sync list","Check your connection and try again.")}}}function renderFamilyLists(){}async function familyBoot(){settings.authToken||"function"!=typeof ensureAccount||await ensureAccount(),settings.authToken&&(renderFamily(),"function"==typeof buildAssigneePicker&&buildAssigneePicker(),loadFamily(),
-loadFamilyInbox(),loadFamilyLists())}wire("#famSaveMeBtn",async()=>{const e=meProfile();e.name=($("#famMeName").value||"").trim()||"Me",e.emoji=famNewEmoji,e.color=famNewColor,save();const t=$("#profileName");t&&(t.textContent=e.name);const i=$("#profileEmoji");i&&(i.textContent=e.emoji),await pushMyProfile(),await loadFamily(),toast("💛 Saved","Your family profile is updated.")}),wire("#famInviteBtn",async()=>{
-if(!await ensureAccount())return toast("Could not turn on sync","Check your connection and try again.");const e=meProfile();try{const t=await fetch(`${API}/family/invite`,{method:"POST",headers:authHeaders(!0),body:JSON.stringify({name:e.name,emoji:e.emoji,color:e.color})});if(!t.ok)return toast("Could not create invite","Try again.");const i=await t.json();pendingInviteUntil=i.expires||Date.now()+9e5,lastFamilyActivityAt=Date.now();$("#famInviteCode").textContent=i.code;const a=Math.max(1,Math.round((i.expires-Date.now())/6e4))
-;$("#famInviteExpiry").textContent=`Share this code — expires in about ${a} min`,$("#famInviteWrap").classList.remove("hidden"),await loadFamily()}catch(e){toast("Network error","Try again.")}}),wire("#famJoinBtn",async()=>{const e=($("#famJoinCode").value||"").trim().toUpperCase().replace(/\s/g,"");if(e.length<6)return toast("Enter a code","Ask your family member for their invite code.");if(!await ensureAccount())return toast("Could not turn on sync","Check your connection and try again.")
-;const t=meProfile();try{const i=await fetch(`${API}/family/join`,{method:"POST",headers:authHeaders(!0),body:JSON.stringify({code:e,name:t.name,emoji:t.emoji,color:t.color})});if(429===i.status)return toast("Too many tries","Wait a minute and try again.");if(!i.ok)return toast("That code did not work","Double-check it and try again.");const a=await i.json();window.family={familyId:a.familyId,members:a.members||[]},cacheFamily(window.family),lastFamilyActivityAt=Date.now(),pendingInviteUntil=0,$("#famJoinCode").value="",renderFamily(),
-"function"==typeof buildAssigneePicker&&buildAssigneePicker(),await loadFamilyLists(),toast("🎉 Joined!","You are now linked with your family.")}catch(e){toast("Network error","Try again.")}}),wire("#familyLeaveBtn",()=>{confirm("👋","Leave this family?","You will stop sharing lists and assignments with them. Your own data stays.",async()=>{markFamilyLeft(),clearFamilyLocal();try{if(!(await fetch(`${API}/family/leave`,{method:"POST",headers:authHeaders(!0),body:JSON.stringify({leaveAll:!0})
-})).ok)throw new Error("leave failed")}catch(e){return void toast("Left locally","Could not reach the server, but this device is no longer showing that family.")}clearFamilyLocal(),toast("You left the family","")},()=>{})}),wire("#profileBtn",openFamilyDialog),wire("#closeFamilyDialog",()=>$("#familyDialog").close()),wire("#closeFamily",()=>$("#familyDialog").close()),wire("#famRemindBtn",async()=>{const e=$("#remindMember"),t=e?e.value:""
-;if(!t)return toast("Add a family member first","Invite someone to send reminders.");const i=($("#remindText").value||"").trim();if(!i)return toast("What is the reminder?","Type a short message.");const a=$("#remindWhen").value,n=a?new Date(a).getTime():Date.now();try{if(!(await fetch(`${API}/family/remind`,{method:"POST",headers:authHeaders(!0),body:JSON.stringify({toUser:t,title:i,fireAt:n})})).ok)throw new Error;$("#remindText").value="",$("#remindWhen").value="",
-toast("🔔 Reminder sent",n>Date.now()+6e4?"It will arrive at the chosen time.":"Delivered now.")}catch(e){toast("Could not send reminder","Try again.")}}),setTimeout(familyBoot,900);function familyFetch(){if(settings.authToken&&"visible"===document.visibilityState){const e=inFamily(),t=Date.now()<pendingInviteUntil;(e||t)&&loadFamily(),e&&(loadFamilyInbox(),loadFamilyLists())}}function familyPollTick(){try{familyFetch()}finally{const e=inFamily()||Date.now()<pendingInviteUntil,t=Date.now()-lastFamilyActivityAt<3e4;window.__daysieFamilyPoll=setTimeout(familyPollTick,e?t?5e3:25e3:15e3)}}window.__daysieFamilyPoll||familyPollTick();document.addEventListener("visibilitychange",()=>{!document.hidden&&settings.authToken&&(lastFamilyActivityAt=Date.now(),inFamily()||loadFamily(),clearTimeout(window.__daysieFamilyPoll),familyPollTick())});"serviceWorker"in navigator&&navigator.serviceWorker.addEventListener("message",e=>{e.data&&"family-list-updated"===e.data.type&&(loadFamily(),loadFamilyLists(),"function"==typeof toast&&toast("📝 Shared list updated",e.data.body||"A family member changed a list."))});
+const FAMILY_CACHE_KEY = "daysie.family.v1",
+  FAMILY_INBOX_DONE_KEY = "daysie.familyInbox.done.v4",
+  FAMILY_LEFT_KEY = "daysie.family.leftAt.v1";
+function readCachedFamily() {
+  try {
+    const e = JSON.parse(localStorage.getItem(FAMILY_CACHE_KEY) || "null");
+    if (e && e.familyId && Array.isArray(e.members)) return e;
+  } catch (e) {}
+  return null;
+}
+function cacheFamily(e) {
+  try {
+    e && e.familyId && Array.isArray(e.members) && e.members.length
+      ? localStorage.setItem(
+          FAMILY_CACHE_KEY,
+          JSON.stringify({ familyId: e.familyId, members: e.members }),
+        )
+      : localStorage.removeItem(FAMILY_CACHE_KEY);
+  } catch (e) {}
+}
+function readDoneInboxIds() {
+  try {
+    return new Set(
+      JSON.parse(localStorage.getItem(FAMILY_INBOX_DONE_KEY) || "[]"),
+    );
+  } catch (e) {
+    return new Set();
+  }
+}
+function rememberDoneInboxId(e) {
+  try {
+    const t = readDoneInboxIds();
+    (t.add(e),
+      localStorage.setItem(
+        FAMILY_INBOX_DONE_KEY,
+        JSON.stringify([...t].slice(-250)),
+      ));
+  } catch (e) {}
+}
+function markFamilyLeft() {
+  try {
+    (localStorage.setItem(FAMILY_LEFT_KEY, String(Date.now())),
+      localStorage.removeItem(FAMILY_CACHE_KEY));
+  } catch (e) {}
+}
+function clearFamilyLeft() {
+  try {
+    localStorage.removeItem(FAMILY_LEFT_KEY);
+  } catch (e) {}
+}
+function recentlyLeftFamily() {
+  try {
+    const e = Number(localStorage.getItem(FAMILY_LEFT_KEY) || 0);
+    return !!e && Date.now() - e < 3e5;
+  } catch (e) {
+    return !1;
+  }
+}
+function clearFamilyLocal() {
+  ((window.family = { familyId: null, members: [] }),
+    (window.familyLists = []),
+    (db.lists = []),
+    cacheFamily(null));
+  try {
+    save();
+  } catch (e) {}
+  (renderFamily(),
+    "function" == typeof renderLists && renderLists(),
+    "function" == typeof buildAssigneePicker && buildAssigneePicker());
+}
+(!(function () {
+  if (document.getElementById("familyRuntimeStyles")) return;
+  const e = document.createElement("style");
+  ((e.id = "familyRuntimeStyles"),
+    (e.textContent =
+      "#familyDialog label,#familyDialog input,#familyDialog select{min-width:0;max-width:100%;box-sizing:border-box}#remindWhen{display:block;width:100%;max-width:100%;appearance:none;-webkit-appearance:none}"),
+    document.head.appendChild(e));
+})(),
+  (window.family = readCachedFamily() || { familyId: null, members: [] }),
+  (window.familyInbox = []),
+  (window.familyLists = []));
+let famNewEmoji = "🌼",
+  famNewColor = "sun",
+  familyListsLocalEditAt = 0,
+  famSeen = null,
+  pendingInviteUntil = 0,
+  lastFamilyActivityAt = Date.now();
+function notifyNewMembers(e) {
+  e = e || [];
+  const t = new Set(e.map((e) => e.userId));
+  null !== famSeen
+    ? (e.forEach((e) => {
+        if (e.isMe || famSeen.has(e.userId)) return;
+        const t = e.name || "Someone";
+        if (
+          ("function" == typeof toast &&
+            toast(
+              "🎉 " + t + " joined your family!",
+              "You can now share lists and assign each other reminders.",
+            ),
+          "visible" !== document.visibilityState &&
+            "Notification" in window &&
+            "granted" === Notification.permission)
+        )
+          try {
+            new Notification("👨‍👩‍👧 " + t + " joined your family", {
+              body: "Open Daysie to start sharing.",
+              tag: "fam-join-" + e.userId,
+            });
+          } catch (e) {}
+      }),
+      (famSeen = t))
+    : (famSeen = t);
+}
+function authHeaders(e) {
+  const t = { Authorization: `Bearer ${settings.authToken}` };
+  return (e && (t["Content-Type"] = "application/json"), t);
+}
+function meProfile() {
+  return (
+    (db.profiles && db.profiles[0]) || { name: "Me", emoji: "🌼", color: "sun" }
+  );
+}
+function colorHex(e) {
+  const t = (profileColors.find((t) => t.id === e) || {}).color;
+  return t || (/^#[0-9a-fA-F]{3,8}$/.test(e || "") ? e : "#ffcd57");
+}
+function inFamily() {
+  return !!(
+    window.family &&
+    window.family.familyId &&
+    (window.family.members || []).length > 1
+  );
+}
+async function loadFamily() {
+  if (!settings.authToken) return void renderFamily();
+  const e = !!(
+    window.family &&
+    window.family.familyId &&
+    (window.family.members || []).length
+  );
+  try {
+    const t = await fetch(`${API}/family?ts=${Date.now()}`, {
+      headers: authHeaders(),
+      cache: "no-store",
+    });
+    if (!t.ok) return;
+    const i = await t.json();
+    let a = { familyId: i.familyId || null, members: i.members || [] };
+    if (!a.familyId && !(a.members || []).length) {
+      if (recentlyLeftFamily() || !e) return void clearFamilyLocal();
+      {
+        const e = await recoverCachedFamily();
+        if (!e) return void clearFamilyLocal();
+        a = e;
+      }
+    }
+    (clearFamilyLeft(),
+      (window.family = a),
+      cacheFamily(window.family),
+      notifyNewMembers(window.family.members),
+      renderFamily(),
+      "function" == typeof buildAssigneePicker && buildAssigneePicker());
+  } catch (e) {
+    console.error("loadFamily", e);
+  }
+}
+async function recoverCachedFamily() {
+  const e = readCachedFamily();
+  if (!e || !e.familyId || !settings.authToken) return null;
+  try {
+    const t = meProfile(),
+      i = await fetch(`${API}/family/recover`, {
+        method: "POST",
+        headers: authHeaders(!0),
+        body: JSON.stringify({
+          familyId: e.familyId,
+          name: t.name,
+          emoji: t.emoji,
+          color: t.color,
+        }),
+      });
+    if (!i.ok) return null;
+    const a = await i.json();
+    return a.familyId
+      ? { familyId: a.familyId, members: a.members || [] }
+      : null;
+  } catch (e) {
+    return null;
+  }
+}
+async function pushMyProfile() {
+  if (!settings.authToken) return;
+  const e = meProfile();
+  try {
+    await fetch(`${API}/family/profile`, {
+      method: "POST",
+      headers: authHeaders(!0),
+      body: JSON.stringify({ name: e.name, emoji: e.emoji, color: e.color }),
+    });
+  } catch (e) {}
+}
+function renderFamily() {
+  const e = window.family || { members: [] },
+    t = $("#familyMembers");
+  t &&
+    (t.innerHTML = (e.members || []).length
+      ? e.members
+          .map(
+            (e) =>
+              `<div class="family-member"><div class="profile-avatar" style="background:${colorHex(e.color)}">${esc(e.emoji || "🙂")}</div><div class="profile-info"><b>${esc(e.name)}${e.isMe ? " (you)" : ""}</b><small>${e.isMe ? "This is you" : "Linked account"}</small></div></div>`,
+          )
+          .join("")
+      : '<p style="color:var(--soft);font-weight:700">No family linked yet. Invite someone below, or join with their code.</p>');
+  const i = $("#familyLeaveBtn");
+  (i && i.classList.toggle("hidden", (e.members || []).length <= 1),
+    renderRemindMembers(),
+    renderFamilyInbox(),
+    renderFamilyLists());
+}
+async function openFamilyDialog() {
+  const e = $("#familyDialog");
+  if (!e) return;
+  const t = meProfile();
+  ((famNewEmoji = t.emoji || "🌼"), (famNewColor = t.color || "sun"));
+  const i = $("#famMeName");
+  i && (i.value = t.name || "Me");
+  const a = $("#famColorPicker");
+  a &&
+    ((a.innerHTML = profileColors
+      .map(
+        (e) =>
+          `<button type="button" data-fcolor="${e.id}" style="background:${e.color}" class="${e.id === famNewColor ? "on" : ""}"></button>`,
+      )
+      .join("")),
+    $$("#famColorPicker button").forEach(
+      (e) =>
+        (e.onclick = () => {
+          ((famNewColor = e.dataset.fcolor),
+            $$("#famColorPicker button").forEach((e) =>
+              e.classList.remove("on"),
+            ),
+            e.classList.add("on"));
+        }),
+    ));
+  const n = $("#famEmojiPicker");
+  n &&
+    ((n.innerHTML = profileEmojis
+      .map(
+        (e) =>
+          `<button type="button" data-femoji="${e}" class="${e === famNewEmoji ? "on" : ""}">${e}</button>`,
+      )
+      .join("")),
+    $$("#famEmojiPicker button").forEach(
+      (e) =>
+        (e.onclick = () => {
+          ((famNewEmoji = e.dataset.femoji),
+            $$("#famEmojiPicker button").forEach((e) =>
+              e.classList.remove("on"),
+            ),
+            e.classList.add("on"));
+        }),
+    ));
+  const o = $("#familySyncGate"),
+    s = $("#familyBody");
+  (settings.authToken
+    ? (o && o.classList.add("hidden"), s && s.classList.remove("hidden"))
+    : (o && o.classList.remove("hidden"), s && s.classList.add("hidden")),
+    e.showModal(),
+    loadFamily());
+}
+function wire(e, t, i) {
+  const a = $(e);
+  a && (a[i || "onclick"] = t);
+}
+async function assignTaskToMember(e, t) {
+  if (!(await ensureAccount()))
+    return toast("Could not assign", "Sync is not ready yet. Try again.");
+  const i = (window.family.members || []).find((t) => t.userId === e);
+  try {
+    if (
+      !(
+        await fetch(`${API}/family/assign`, {
+          method: "POST",
+          headers: authHeaders(!0),
+          body: JSON.stringify({
+            toUser: e,
+            task: {
+              title: t.title,
+              note: t.note,
+              due: t.due,
+              priority: t.priority,
+              category: t.category,
+            },
+          }),
+        })
+      ).ok
+    )
+      throw new Error("assign failed");
+    (toast(
+      "📋 Sent to " + (i ? i.name : "family"),
+      "It landed in their Daysie.",
+    ),
+      await loadFamilyInbox());
+  } catch (e) {
+    (await loadFamily(),
+      toast("Could not assign", "Check your connection and try again."));
+  }
+}
+function renderRemindMembers() {
+  const e = $("#remindMember");
+  if (!e) return;
+  const t = (window.family.members || []).filter((e) => !e.isMe);
+  e.innerHTML = t.length
+    ? t
+        .map(
+          (e) =>
+            `<option value="${esc(e.userId)}">${esc(e.emoji || "🙂")} ${esc(e.name)}</option>`,
+        )
+        .join("")
+    : '<option value="">No family members yet</option>';
+}
+async function loadFamilyInbox() {
+  if (settings.authToken && !recentlyLeftFamily())
+    try {
+      const e = await fetch(`${API}/family/inbox`, { headers: authHeaders() });
+      if (!e.ok) return;
+      const t = await e.json(),
+        i = readDoneInboxIds();
+      ((window.familyInbox = (t.items || []).filter((e) => !i.has(e.id))),
+        renderFamilyInbox());
+    } catch (e) {}
+}
+function renderFamilyInbox() {
+  const e = $("#familyInboxSection"),
+    t = $("#familyInbox");
+  if (!e || !t) return;
+  const i = window.familyInbox || [];
+  if (!i.length) return (e.classList.add("hidden"), void (t.innerHTML = ""));
+  (e.classList.remove("hidden"),
+    (t.innerHTML = i
+      .map((e) => {
+        const t = e.from || {},
+          i = e.payload || {},
+          a = "task" === e.kind,
+          n = a ? "📋" : "🔔",
+          s = safeDomId(e.id),
+          o = i.due
+            ? " · " + fmt(i.due)
+            : e.fireAt
+              ? " · " + fmt(e.fireAt)
+              : "";
+        return `<article class="inbox-card">\n      <div class="inbox-head"><span class="inbox-icon">${n}</span><div><b>${esc(i.title || (a ? "New task" : "Reminder"))}</b><small>From ${esc(t.emoji || "")} ${esc(t.name || "family")}${o}</small></div></div>\n      ${i.note ? `<p class="inbox-note">${esc(i.note)}</p>` : ""}\n      <div class="inbox-actions">\n        ${a ? `<button type="button" class="primary small" data-inbox-accept="${s}">➕ Add to my tasks</button>` : `<button type="button" class="primary small" data-inbox-ack="${s}">👍 Got it</button>`}\n        <button type="button" class="soft small" data-inbox-dismiss="${s}">Dismiss</button>\n      </div>\n    </article>`;
+      })
+      .join("")),
+    $$("#familyInbox [data-inbox-accept]").forEach(
+      (e) => (e.onclick = () => acceptInboxTask(e.dataset.inboxAccept)),
+    ),
+    $$("#familyInbox [data-inbox-ack]").forEach(
+      (e) => (e.onclick = () => ackInbox(e.dataset.inboxAck)),
+    ),
+    $$("#familyInbox [data-inbox-dismiss]").forEach(
+      (e) => (e.onclick = () => ackInbox(e.dataset.inboxDismiss)),
+    ));
+}
+function acceptInboxTask(e) {
+  const t = (window.familyInbox || []).find((t) => t.id === e);
+  if (!t) return;
+  const i = t.payload || {};
+  (getProfile().tasks.push({
+    id: id(),
+    done: !1,
+    created: Date.now(),
+    title: i.title || "Task",
+    due: i.due || null,
+    note: i.note || "",
+    priority: i.priority || "low",
+    repeat: "none",
+    repeatUntil: null,
+    category: i.category || "none",
+    assignee: null,
+    subtasks: [],
+    notified: !1,
+  }),
+    save(),
+    renderAll(),
+    ackInbox(e),
+    toast("➕ Added", "Saved to your reminders."));
+}
+async function ackInbox(e) {
+  (rememberDoneInboxId(e),
+    (window.familyInbox = (window.familyInbox || []).filter((t) => t.id !== e)),
+    renderFamilyInbox());
+  try {
+    await fetch(`${API}/family/inbox/ack`, {
+      method: "POST",
+      headers: authHeaders(!0),
+      body: JSON.stringify({ id: e, status: "done" }),
+    });
+  } catch (e) {}
+}
+async function loadFamilyLists() {
+  if (recentlyLeftFamily())
+    return (
+      (window.familyLists = []),
+      (db.lists = []),
+      void ("function" == typeof renderLists && renderLists())
+    );
+  if (
+    settings.authToken &&
+    window.family.familyId &&
+    !(familyListsLocalEditAt && Date.now() - familyListsLocalEditAt < 6e3)
+  )
+    try {
+      const e = await fetch(`${API}/family/lists?ts=${Date.now()}`, {
+        headers: authHeaders(),
+        cache: "no-store",
+      });
+      if (!e.ok) return;
+      const t = await e.json();
+      ((window.familyLists = t.lists || []),
+        (db.lists = window.familyLists),
+        "function" == typeof renderLists && renderLists());
+    } catch (e) {}
+}
+async function saveFamilyLists(e) {
+  if (!recentlyLeftFamily() && settings.authToken && window.family.familyId) {
+    ((familyListsLocalEditAt = Date.now()),
+      (lastFamilyActivityAt = Date.now()),
+      (window.familyLists = db.lists || window.familyLists || []));
+    try {
+      const t = await fetch(`${API}/family/lists`, {
+        method: "PUT",
+        headers: authHeaders(!0),
+        body: JSON.stringify({
+          lists: window.familyLists,
+          action: e || "updated a shared list",
+        }),
+      });
+      if (t.ok) {
+        const e = await t.json().catch(() => ({}));
+        e.updated && (window.familyListsUpdated = e.updated);
+      } else
+        "function" == typeof toast &&
+          toast("Could not sync list", "Check your connection and try again.");
+    } catch (e) {
+      "function" == typeof toast &&
+        toast("Could not sync list", "Check your connection and try again.");
+    }
+  }
+}
+function renderFamilyLists() {}
+async function familyBoot() {
+  settings.authToken &&
+    (renderFamily(),
+    "function" == typeof buildAssigneePicker && buildAssigneePicker(),
+    loadFamily(),
+    loadFamilyInbox(),
+    loadFamilyLists());
+}
+(wire("#famSaveMeBtn", async () => {
+  const e = meProfile();
+  ((e.name = ($("#famMeName").value || "").trim() || "Me"),
+    (e.emoji = famNewEmoji),
+    (e.color = famNewColor),
+    save());
+  const t = $("#profileName");
+  t && (t.textContent = e.name);
+  const i = $("#profileEmoji");
+  (i && (i.textContent = e.emoji),
+    await pushMyProfile(),
+    await loadFamily(),
+    toast("💛 Saved", "Your family profile is updated."));
+}),
+  wire("#famInviteBtn", async () => {
+    if (!(await ensureAccount()))
+      return toast(
+        "Could not turn on sync",
+        "Check your connection and try again.",
+      );
+    const e = meProfile();
+    try {
+      const t = await fetch(`${API}/family/invite`, {
+        method: "POST",
+        headers: authHeaders(!0),
+        body: JSON.stringify({ name: e.name, emoji: e.emoji, color: e.color }),
+      });
+      if (!t.ok) return toast("Could not create invite", "Try again.");
+      const i = await t.json();
+      ((pendingInviteUntil = i.expires || Date.now() + 9e5),
+        (lastFamilyActivityAt = Date.now()));
+      $("#famInviteCode").textContent = i.code;
+      const a = Math.max(1, Math.round((i.expires - Date.now()) / 6e4));
+      (($("#famInviteExpiry").textContent =
+        `Share this code — expires in about ${a} min`),
+        $("#famInviteWrap").classList.remove("hidden"),
+        await loadFamily());
+    } catch (e) {
+      toast("Network error", "Try again.");
+    }
+  }),
+  wire("#famJoinBtn", async () => {
+    const e = ($("#famJoinCode").value || "")
+      .trim()
+      .toUpperCase()
+      .replace(/\s/g, "");
+    if (e.length < 6)
+      return toast(
+        "Enter a code",
+        "Ask your family member for their invite code.",
+      );
+    if (!(await ensureAccount()))
+      return toast(
+        "Could not turn on sync",
+        "Check your connection and try again.",
+      );
+    const t = meProfile();
+    try {
+      const i = await fetch(`${API}/family/join`, {
+        method: "POST",
+        headers: authHeaders(!0),
+        body: JSON.stringify({
+          code: e,
+          name: t.name,
+          emoji: t.emoji,
+          color: t.color,
+        }),
+      });
+      if (429 === i.status)
+        return toast("Too many tries", "Wait a minute and try again.");
+      if (!i.ok)
+        return toast(
+          "That code did not work",
+          "Double-check it and try again.",
+        );
+      const a = await i.json();
+      ((window.family = { familyId: a.familyId, members: a.members || [] }),
+        cacheFamily(window.family),
+        (lastFamilyActivityAt = Date.now()),
+        (pendingInviteUntil = 0),
+        ($("#famJoinCode").value = ""),
+        renderFamily(),
+        "function" == typeof buildAssigneePicker && buildAssigneePicker(),
+        await loadFamilyLists(),
+        toast("🎉 Joined!", "You are now linked with your family."));
+    } catch (e) {
+      toast("Network error", "Try again.");
+    }
+  }),
+  wire("#familyLeaveBtn", () => {
+    confirm(
+      "👋",
+      "Leave this family?",
+      "You will stop sharing lists and assignments with them. Your own data stays.",
+      async () => {
+        (markFamilyLeft(), clearFamilyLocal());
+        try {
+          if (
+            !(
+              await fetch(`${API}/family/leave`, {
+                method: "POST",
+                headers: authHeaders(!0),
+                body: JSON.stringify({ leaveAll: !0 }),
+              })
+            ).ok
+          )
+            throw new Error("leave failed");
+        } catch (e) {
+          return void toast(
+            "Left locally",
+            "Could not reach the server, but this device is no longer showing that family.",
+          );
+        }
+        (clearFamilyLocal(), toast("You left the family", ""));
+      },
+      () => {},
+    );
+  }),
+  wire("#profileBtn", openFamilyDialog),
+  wire("#closeFamilyDialog", () => $("#familyDialog").close()),
+  wire("#closeFamily", () => $("#familyDialog").close()),
+  wire("#famRemindBtn", async () => {
+    const e = $("#remindMember"),
+      t = e ? e.value : "";
+    if (!t)
+      return toast(
+        "Add a family member first",
+        "Invite someone to send reminders.",
+      );
+    const i = ($("#remindText").value || "").trim();
+    if (!i) return toast("What is the reminder?", "Type a short message.");
+    const a = $("#remindWhen").value,
+      n = a ? new Date(a).getTime() : Date.now();
+    try {
+      if (
+        !(
+          await fetch(`${API}/family/remind`, {
+            method: "POST",
+            headers: authHeaders(!0),
+            body: JSON.stringify({ toUser: t, title: i, fireAt: n }),
+          })
+        ).ok
+      )
+        throw new Error();
+      (($("#remindText").value = ""),
+        ($("#remindWhen").value = ""),
+        toast(
+          "🔔 Reminder sent",
+          n > Date.now() + 6e4
+            ? "It will arrive at the chosen time."
+            : "Delivered now.",
+        ));
+    } catch (e) {
+      toast("Could not send reminder", "Try again.");
+    }
+  }),
+  setTimeout(familyBoot, 900));
+function familyFetch() {
+  if (settings.authToken && "visible" === document.visibilityState) {
+    const e = inFamily(),
+      t = Date.now() < pendingInviteUntil;
+    ((e || t) && loadFamily(), e && (loadFamilyInbox(), loadFamilyLists()));
+  }
+}
+function familyPollTick() {
+  try {
+    familyFetch();
+  } finally {
+    const e = inFamily() || Date.now() < pendingInviteUntil,
+      t = Date.now() - lastFamilyActivityAt < 3e4;
+    window.__daysieFamilyPoll = setTimeout(
+      familyPollTick,
+      e ? (t ? 5e3 : 25e3) : 15e3,
+    );
+  }
+}
+window.__daysieFamilyPoll || familyPollTick();
+document.addEventListener("visibilitychange", () => {
+  !document.hidden &&
+    settings.authToken &&
+    ((lastFamilyActivityAt = Date.now()),
+    inFamily() || loadFamily(),
+    clearTimeout(window.__daysieFamilyPoll),
+    familyPollTick());
+});
+"serviceWorker" in navigator &&
+  navigator.serviceWorker.addEventListener("message", (e) => {
+    e.data &&
+      "family-list-updated" === e.data.type &&
+      (loadFamily(),
+      loadFamilyLists(),
+      "function" == typeof toast &&
+        toast(
+          "📝 Shared list updated",
+          e.data.body || "A family member changed a list.",
+        ));
+  });
