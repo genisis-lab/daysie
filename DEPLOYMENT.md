@@ -9,6 +9,7 @@ Your site is already live on Cloudflare Pages! The frontend is ready.
 ## Backend Setup (Cloudflare Workers + D1)
 
 ### Prerequisites
+
 - Cloudflare account (free tier works!)
 - Node.js installed
 - Wrangler CLI: `npm install -g wrangler`
@@ -31,6 +32,13 @@ Copy the `database_id` from the output and paste it into `wrangler.toml` (replac
 
 ```bash
 wrangler d1 execute daysie-db --file=schema.sql
+```
+
+For an existing deployment, apply the incremental migration instead of resetting
+tables:
+
+```bash
+wrangler d1 execute daysie-db --file=migrations/0001_security_hardening.sql
 ```
 
 ### Step 4: Generate VAPID Keys (for Web Push)
@@ -123,16 +131,19 @@ For a family app, you'll stay well within free tier limits! 🌼
 ## Troubleshooting
 
 ### "Network error" when signing in
+
 - Check that the Worker URL in `app.js` matches your deployed Worker
 - Check Worker logs: `wrangler tail`
 
 ### Pairing code not working
+
 - Codes expire after ~3 minutes — generate a fresh one
 - Make sure the new device's request was approved on the original device
 - If you see "too many attempts", wait a minute (per-IP rate limit) and retry
 - Check Worker logs: `wrangler tail`
 
 ### Push notifications not working
+
 - Ensure VAPID keys are set correctly
 - The Worker sends Web Push using the built-in WebCrypto API (no `web-push` package needed). For background push to work you MUST set the `VAPID_PRIVATE_KEY` secret and redeploy the Worker (`npx wrangler deploy`).
 - Background push only fires for tasks with a due date/time. On iPhone, the user must add Daysie to the Home Screen and open it from there (iOS 16.4+).
@@ -158,6 +169,7 @@ If you changed `worker.js` or `schema.sql`, also redeploy the Worker:
 `npx wrangler deploy` (and run any schema migration first).
 
 ### Data not syncing
+
 - Check that sync is on (Settings should show "Sync is on")
 - Click "Sync now" to force a sync
 - Check Worker logs for errors

@@ -379,6 +379,7 @@ function go(e) {
         o.classList.toggle("active", t === e),
       ));
   }),
+    $("#fab").classList.toggle("hidden", !["today", "tasks"].includes(e)),
     "calendar" === e && renderCalendar(),
     "journal" === e && renderEntries(),
     "insights" === e && renderInsights(),
@@ -1456,6 +1457,37 @@ function confetti() {
       (e.download = "daysie-backup-" + day() + ".json"),
       e.click());
   }),
+  ($("#importBtn").onclick = () => $("#importFile").click()),
+  ($("#importFile").onchange = async (e) => {
+    const t = e.target.files && e.target.files[0];
+    if (!t) return;
+    try {
+      const e = normalizeImport(JSON.parse(await t.text()));
+      confirm(
+        "⬆️",
+        "Import this backup?",
+        "This replaces the data on this device. Your current cloud account stays connected.",
+        () => {
+          ((db = e),
+            (activeProfileId = db.profiles[0].id),
+            saveActiveProfile(),
+            save(),
+            renderAll(),
+            "function" == typeof clearFamilyLocal && clearFamilyLocal(),
+            "function" == typeof familyBoot && familyBoot(),
+            toast(
+              "✅ Backup imported",
+              "Daysie has refreshed your local data.",
+            ));
+        },
+        () => {},
+      );
+    } catch (e) {
+      toast("❌ Import failed", "Choose a valid Daysie JSON backup.");
+    } finally {
+      e.target.value = "";
+    }
+  }),
   ($("#exportPdfBtn").onclick = async () => {
     toast("📄 Generating PDF...", "This may take a moment.");
     try {
@@ -1515,11 +1547,64 @@ function updateAccountUI() {
       $("#deviceUserId") &&
         ($("#deviceUserId").textContent = settings.userId
           ? "Account: " + settings.userId.slice(0, 8) + "…"
-          : "Account connected"))
+          : "Account connected"),
+      refreshAccountDetails())
     : ($("#loggedOutSection").classList.remove("hidden"),
       $("#loggedInSection").classList.add("hidden"),
       $("#enterCodeSection")?.classList.add("hidden"),
       $("#linkCodeSection")?.classList.add("hidden"));
+}
+async function refreshAccountDetails() {
+  if (!settings.authToken) return;
+  const e = $("#sessionStatus"),
+    t = $("#photoStorageStatus"),
+    o = { Authorization: `Bearer ${settings.authToken}` };
+  e && (e.textContent = "Checking linked devices…");
+  t && (t.textContent = "Checking cloud photos…");
+  try {
+    const t = await fetch(`${API}/sessions`, { headers: o });
+    if (t.ok && e) {
+      const o = await t.json(),
+        n = o.sessions || [],
+        a = n.length,
+        s = n.find((e) => e.current);
+      e.textContent = `${a} linked device${1 === a ? "" : "s"}${s ? " · this one ends " + new Date(s.expires).toLocaleDateString() : ""}`;
+    }
+  } catch (t) {
+    e && (e.textContent = "Could not check linked devices");
+  }
+  try {
+    const e = await fetch(`${API}/photos`, { headers: o });
+    if (e.ok && t) {
+      const o = await e.json(),
+        n = (o.photos || []).length;
+      t.textContent = `${n} cloud photo${1 === n ? "" : "s"} stored`;
+    }
+  } catch (e) {
+    t && (t.textContent = "Could not check cloud photos");
+  }
+}
+function normalizeImport(e) {
+  if (!e || !Array.isArray(e.profiles) || !e.profiles.length)
+    throw new Error("Backup is missing profiles");
+  const t = e.profiles.map((e, t) => ({
+    id: safeDomId(e.id, `profile-${t + 1}`) || `profile-${t + 1}`,
+    name: String(e.name || "Me").slice(0, 48),
+    emoji: String(e.emoji || "🌼").slice(0, 8),
+    color: safeDomId(e.color, "sun"),
+    tasks: Array.isArray(e.tasks) ? e.tasks : [],
+    entries: Array.isArray(e.entries) ? e.entries : [],
+    streak: Number.isFinite(+e.streak) ? +e.streak : 0,
+    lastCheck: String(e.lastCheck || ""),
+    prompt: Number.isFinite(+e.prompt) ? +e.prompt : 0,
+    habits: Array.isArray(e.habits) ? e.habits : [],
+  }));
+  return {
+    profiles: t,
+    onboarded: !0,
+    lists: Array.isArray(e.lists) ? e.lists : [],
+    tourDone: !!e.tourDone,
+  };
 }
 function stripPhotosForSync(e) {
   return (e || []).map((e) => ({
@@ -1823,6 +1908,37 @@ async function pullFromCloud() {
           } catch (e) {
             toast(
               "Could not log out other devices",
+              "Check your connection and try again.",
+            );
+          }
+        },
+        () => {},
+      );
+    }),
+  $("#cleanupPhotosBtn") &&
+    ($("#cleanupPhotosBtn").onclick = () => {
+      if (!settings.authToken)
+        return toast("Turn on sync first", "Cloud photo cleanup needs sync.");
+      confirm(
+        "🧹",
+        "Clean unused cloud photos?",
+        "Daysie will delete cloud photos that are no longer referenced by your synced journal.",
+        async () => {
+          try {
+            const e = await fetch(`${API}/photos/prune-unused`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${settings.authToken}` },
+            });
+            if (!e.ok) throw new Error("cleanup failed");
+            const t = await e.json();
+            (toast(
+              "🧹 Cloud photos cleaned",
+              `${t.deleted || 0} unused photo${1 === t.deleted ? "" : "s"} removed.`,
+            ),
+              refreshAccountDetails());
+          } catch (e) {
+            toast(
+              "Could not clean photos",
               "Check your connection and try again.",
             );
           }
