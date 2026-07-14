@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS "user" (
   name TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
   emailVerified INTEGER NOT NULL DEFAULT 0,
+  username TEXT,
+  displayUsername TEXT,
   image TEXT,
   createdAt INTEGER NOT NULL,
   updatedAt INTEGER NOT NULL
@@ -67,6 +69,7 @@ CREATE TABLE IF NOT EXISTS verification (
 CREATE INDEX IF NOT EXISTS idx_better_session_user ON "session"(userId);
 CREATE INDEX IF NOT EXISTS idx_better_account_user ON account(userId);
 CREATE INDEX IF NOT EXISTS idx_better_verification_identifier ON verification(identifier);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_better_user_username ON "user"(username);
 
 -- Short-lived device pairing codes with approve-on-source-device handshake.
 -- redeemed: a new device has entered the code and is waiting.

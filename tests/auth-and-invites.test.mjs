@@ -13,11 +13,13 @@ test("Better Auth is mounted with D1, email/password, and bearer sessions", () =
   assert.match(auth, /d1Native:\s*env\.DB/);
   assert.match(auth, /emailAndPassword:\s*\{/);
   assert.match(auth, /enabled:\s*true/);
-  assert.match(auth, /plugins:\s*\[bearer\(\)\]/);
+  assert.match(auth, /bearer\(\)/);
+  assert.match(auth, /username\(\{/);
   assert.match(schema, /CREATE TABLE IF NOT EXISTS "user"/);
   assert.match(schema, /CREATE TABLE IF NOT EXISTS "session"/);
   assert.match(schema, /CREATE TABLE IF NOT EXISTS account/);
   assert.match(schema, /CREATE TABLE IF NOT EXISTS verification/);
+  assert.match(schema, /username TEXT/);
 });
 
 test("settings provides accessible sign-in, sign-up, reset, and family email invite forms", () => {
@@ -28,12 +30,16 @@ test("settings provides accessible sign-in, sign-up, reset, and family email inv
     "newPasswordForm",
     "settingsFamilyInviteForm",
     "settingsFamilyEmail",
+    "welcomeCreateAccountBtn",
+    "welcomeSignInBtn",
+    "signUpUsername",
   ]) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, /type="email"/);
   assert.match(html, /aria-live="polite"/);
   assert.match(authUi, /\/sign-in\/email/);
+  assert.match(authUi, /\/sign-in\/username/);
   assert.match(authUi, /\/sign-up\/email/);
   assert.match(authUi, /\/request-password-reset/);
   assert.match(authUi, /\/reset-password/);
@@ -48,6 +54,8 @@ test("Turnstile protects sign-in and sign-up through the managed verification Wo
   assert.match(worker, /verifyTurnstileToken\(E, turnstileToken\)/);
   assert.match(worker, /verification\.action !== "turnstile-spin-v1"/);
   assert.match(worker, /env\.TURNSTILE_VERIFY_URL/);
+  assert.match(html, /api\.js\?render=explicit/);
+  assert.match(authUi, /window\.turnstile\.render/);
 });
 
 test("family invitations can be delivered by email without removing code invites", () => {

@@ -97,6 +97,7 @@ let db = {
     userId: null,
     authProvider: null,
     authEmail: null,
+    authUsername: null,
     pushSubscription: null,
   },
   activeProfileId = "default",
@@ -117,7 +118,7 @@ let db = {
   taskFilter = "all",
   renagTimer = null,
   assignee = null;
-const APP_VERSION = "2026.07.14-20";
+const APP_VERSION = "2026.07.14-21";
 let swRegistration = null,
   updateBannerShown = !1;
 const save = () => {
@@ -1547,8 +1548,16 @@ function updateAccountUI() {
     ? ($("#loggedOutSection").classList.add("hidden"),
       $("#loggedInSection").classList.remove("hidden"),
       $("#accountEmail") &&
-        ($("#accountEmail").textContent = settings.authEmail || "",
-        $("#accountEmail").classList.toggle("hidden", !settings.authEmail)),
+        ($("#accountEmail").textContent = [
+          settings.authUsername ? `@${settings.authUsername}` : "",
+          settings.authEmail || "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        $("#accountEmail").classList.toggle(
+          "hidden",
+          !settings.authEmail && !settings.authUsername,
+        )),
       $("#deviceUserId") &&
         ($("#deviceUserId").textContent = settings.userId
           ? "Account: " + settings.userId.slice(0, 8) + "…"
@@ -1791,6 +1800,7 @@ async function pullFromCloud() {
                 (settings.userId = a.userId),
                 (settings.authProvider = "device-code"),
                 (settings.authEmail = null),
+                (settings.authUsername = null),
                 saveSettings(),
                 updateAccountUI(),
                 updateSyncStatus(),
@@ -1894,6 +1904,7 @@ async function pullFromCloud() {
           (settings.userId = null),
           (settings.authProvider = null),
           (settings.authEmail = null),
+          (settings.authUsername = null),
           (settings.pushSubscription = null),
           saveSettings(),
           updateAccountUI(),

@@ -1,5 +1,5 @@
 import { betterAuth } from "better-auth";
-import { bearer } from "better-auth/plugins";
+import { bearer, username } from "better-auth/plugins";
 import { withCloudflare } from "better-auth-cloudflare";
 
 const cleanOrigin = (value) => {
@@ -93,7 +93,13 @@ export function createDaysieAuth(env, request, executionContext) {
             else await emailPromise;
           },
         },
-        plugins: [bearer()],
+        plugins: [
+          bearer(),
+          username({
+            minUsernameLength: 3,
+            maxUsernameLength: 30,
+          }),
+        ],
       },
     ),
   });

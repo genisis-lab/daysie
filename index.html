@@ -13,7 +13,7 @@
     <link rel="manifest" href="site.webmanifest" />
     <link rel="stylesheet" href="styles.css" />
     <script
-      src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+      src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
       async
       defer
     ></script>
@@ -67,12 +67,23 @@
           ><span>Optional account keeps everything in sync.</span>
         </article>
       </div>
+      <div class="welcome-account-actions" aria-label="Account options">
+        <button id="welcomeCreateAccountBtn" type="button" class="primary wide">
+          Create an account
+        </button>
+        <button id="welcomeSignInBtn" type="button" class="soft wide">
+          I already have an account
+        </button>
+      </div>
+      <div class="auth-divider"><span>or continue without an account</span></div>
+      <label class="welcome-name-label" for="nameInput">Your display name</label>
       <input
         id="nameInput"
         maxlength="24"
+        autocomplete="name"
         placeholder="What should Daysie call you?"
       />
-      <button id="startBtn" class="primary wide">Let's begin ✨</button>
+      <button id="startBtn" class="text-button wide">Continue offline</button>
     </section>
 
     <!-- MAIN APP -->
@@ -589,8 +600,8 @@
               <button type="button" id="showSignUpBtn" role="tab" aria-selected="false">Create account</button>
             </div>
             <form id="signInForm" class="auth-form">
-              <label for="signInEmail">Email address</label>
-              <input id="signInEmail" type="email" autocomplete="email" required placeholder="you@example.com" />
+              <label for="signInIdentifier">Email or username</label>
+              <input id="signInIdentifier" type="text" autocomplete="username" required placeholder="you@example.com or alex" />
               <label for="signInPassword">Password</label>
               <input id="signInPassword" type="password" autocomplete="current-password" minlength="8" required />
               <div class="turnstile-wrap">
@@ -599,6 +610,7 @@
                   data-sitekey="0x4AAAAAAD1eKHXmRxrFBoyl"
                   data-action="turnstile-spin-v1"
                   data-theme="auto"
+                  data-appearance="always"
                 ></div>
               </div>
               <button type="submit" id="signInBtn" class="primary wide">Sign in</button>
@@ -607,6 +619,9 @@
             <form id="signUpForm" class="auth-form hidden">
               <label for="signUpName">Your name</label>
               <input id="signUpName" maxlength="40" autocomplete="name" required placeholder="e.g. Alex" />
+              <label for="signUpUsername">Username</label>
+              <input id="signUpUsername" minlength="3" maxlength="30" autocomplete="username" required pattern="[A-Za-z0-9_.]+" aria-describedby="usernameHint" placeholder="alex_rose" />
+              <small id="usernameHint" class="field-hint">3–30 letters, numbers, underscores, or periods.</small>
               <label for="signUpEmail">Email address</label>
               <input id="signUpEmail" type="email" autocomplete="email" required placeholder="you@example.com" />
               <label for="signUpPassword">Password</label>
@@ -618,6 +633,7 @@
                   data-sitekey="0x4AAAAAAD1eKHXmRxrFBoyl"
                   data-action="turnstile-spin-v1"
                   data-theme="auto"
+                  data-appearance="always"
                 ></div>
               </div>
               <button type="submit" id="signUpBtn" class="primary wide">Create account</button>
