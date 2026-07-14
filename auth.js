@@ -93,6 +93,12 @@ export function createDaysieAuth(env, request, executionContext) {
             else await emailPromise;
           },
         },
+        user: {
+          changeEmail: {
+            enabled: true,
+            updateEmailWithoutVerification: true,
+          },
+        },
         plugins: [
           bearer(),
           username({

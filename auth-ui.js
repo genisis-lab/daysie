@@ -297,6 +297,79 @@ $("#signUpForm")?.addEventListener("submit", async (event) => {
   }
 });
 
+$("#changeEmailForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = $("#changeEmailBtn");
+  const email = $("#changeEmailInput").value.trim().toLowerCase();
+  setButtonBusy(button, true, "Changing…");
+  try {
+    await authRequest("/change-email", { newEmail: email }, settings.authToken);
+    settings.authEmail = email;
+    saveSettings();
+    updateAccountUI();
+    $("#changeEmailForm").reset();
+    toast("Email updated", `You can now sign in with ${email}.`);
+  } catch (error) {
+    toast("Could not change email", error.message);
+  } finally {
+    setButtonBusy(button, false);
+  }
+});
+
+$("#changePasswordForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = $("#changePasswordBtn");
+  const revokeOtherSessions = $("#revokeOtherPasswordSessions").checked;
+  setButtonBusy(button, true, "Updating…");
+  try {
+    const result = await authRequest(
+      "/change-password",
+      {
+        currentPassword: $("#currentPassword").value,
+        newPassword: $("#newPassword").value,
+        revokeOtherSessions,
+      },
+      settings.authToken,
+    );
+    const replacementToken =
+      result.data?.token || result.response.headers.get("set-auth-token");
+    if (replacementToken) {
+      settings.authToken = replacementToken;
+      saveSettings();
+    }
+    form.reset();
+    toast(
+      "Password updated",
+      revokeOtherSessions
+        ? "Other devices were logged out."
+        : "Your password is ready to use.",
+    );
+  } catch (error) {
+    toast("Could not update password", error.message);
+  } finally {
+    setButtonBusy(button, false);
+  }
+});
+
+$("#sendPasswordResetBtn")?.addEventListener("click", async () => {
+  const button = $("#sendPasswordResetBtn");
+  if (!settings.authEmail)
+    return toast("No email available", "Add an email address before requesting a reset link.");
+  setButtonBusy(button, true, "Sending…");
+  try {
+    await authRequest("/request-password-reset", {
+      email: settings.authEmail,
+      redirectTo: `${location.origin}${location.pathname}`,
+    });
+    toast("Reset link requested", "Check your email for a secure password reset link.");
+  } catch (error) {
+    toast("Could not send reset link", error.message);
+  } finally {
+    setButtonBusy(button, false);
+  }
+});
+
 $("#passwordResetRequestForm")?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = $("#sendResetBtn");

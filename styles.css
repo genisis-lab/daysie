@@ -179,6 +179,18 @@ body[data-theme=dark] .tags span{background:var(--card);border:1px solid var(--l
 .account-card span{font-size:28px}
 .account-card b{display:block}
 .account-card small{color:var(--soft);font-size:.8rem}
+.account-security-card{margin:12px 0;padding:14px;border:1.5px solid var(--line);border-radius:14px;background:var(--card)}
+.account-security-heading{display:flex;gap:10px;align-items:flex-start;margin-bottom:8px}
+.account-security-heading>span{font-size:24px;line-height:1}
+.account-security-heading b,.account-security-heading small{display:block}
+.account-security-heading small{color:var(--soft);font-size:.82rem;margin-top:2px}
+.account-security-form{margin-top:12px}
+.account-action-row{display:flex;gap:8px;align-items:center}
+.account-action-row input{min-width:0;flex:1}
+.account-action-row button{flex:0 0 auto;white-space:nowrap}
+.check-row{display:flex;align-items:flex-start;gap:8px;margin:2px 0!important;font-size:.82rem;color:var(--soft)}
+.check-row input{width:auto;min-height:0;margin-top:3px}
+@media(max-width:420px){.account-action-row{align-items:stretch;flex-direction:column}.account-action-row button{width:100%}}
 .tabs{position:fixed;left:50%;bottom:16px;transform:translate(-50%);z-index:10;display:flex;gap:4px;width:min(94%,540px);background:#ffffffdb;backdrop-filter:blur(14px);border:1.5px solid var(--line);border-radius:999px;padding:7px;box-shadow:var(--shadow);padding-bottom:max(7px,env(safe-area-inset-bottom))}
 body[data-theme=dark] .tabs{background:#2a2633e6}
 .tabs button{flex:1;border:0;background:transparent;border-radius:999px;padding:8px 2px;color:var(--muted);font-weight:900;font-size:.8rem}
