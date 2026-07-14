@@ -341,3 +341,49 @@ dialog{max-width:min(560px,calc(100vw - 24px));overflow:hidden}
 .habit-dots i{width:12px;height:12px;border-radius:50%;background:var(--line);display:block}
 .habit-dots i.on{background:var(--hc, var(--green));box-shadow:0 0 0 3px color-mix(in srgb,var(--hc, var(--green)) 20%,transparent)}
 #deviceUserId{display:block;margin-top:2px;opacity:.75}
+
+/* Account and family invitations */
+.auth-intro{display:flex;align-items:center;gap:12px;padding:14px;border:1.5px solid #f3dba8;border-radius:18px;background:linear-gradient(135deg,#fff8df,#fff1e6);margin-bottom:14px}
+.auth-intro>div,.invite-card-heading>div{min-width:0}
+.auth-intro .auth-mark{display:grid;place-items:center;flex:0 0 46px;width:46px;height:46px;border-radius:15px;background:#fff;font-size:25px;box-shadow:0 8px 18px #b46f1320}
+.auth-intro b{display:block;font-size:1.05rem}
+.auth-intro p{margin:3px 0 0;color:var(--soft);font-size:.86rem;font-weight:700;line-height:1.45}
+body[data-theme=dark] .auth-intro{background:linear-gradient(135deg,#3a3420,#3a2c20);border-color:#594c27}
+body[data-theme=dark] .auth-intro .auth-mark{background:var(--bg2)}
+.auth-tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;background:var(--bg2);border-radius:15px;margin-bottom:12px}
+.auth-tabs button{min-height:44px;border:0;border-radius:11px;background:transparent;color:var(--soft);font-weight:900}
+.auth-tabs button[aria-selected=true]{background:var(--card);color:var(--ink);box-shadow:0 3px 10px #513a2118}
+.auth-form{display:grid;gap:8px;padding:2px 1px}
+.auth-form label,.invite-email-form label{margin:4px 0 0!important;font-size:.84rem}
+.auth-form input,.invite-email-form input{min-height:46px}
+.auth-form .primary{min-height:46px;margin-top:4px}
+.turnstile-wrap{min-height:65px;margin:4px 0 2px;overflow:hidden}
+.turnstile-wrap .cf-turnstile{transform-origin:left top}
+@media(max-width:370px){.turnstile-wrap .cf-turnstile{transform:scale(.9);width:111%}}
+.auth-form h4{font-size:1.05rem;margin:4px 0 0}
+.field-hint{display:block;color:var(--soft);font-weight:700;line-height:1.4}
+.text-button{min-height:44px;border:0;background:transparent;color:#95620c;font-weight:900;text-decoration:underline;text-underline-offset:3px}
+body[data-theme=dark] .text-button{color:var(--sun)}
+.auth-back{justify-self:start;padding:0}
+.form-status{border-radius:12px;padding:10px 12px;margin:10px 0 0;background:#eef8ef;color:#34693c;font-weight:800;line-height:1.4}
+.form-status.error{background:#fff0f1;color:#a52e43}
+body[data-theme=dark] .form-status{background:#203826;color:#b9e8c0}
+body[data-theme=dark] .form-status.error{background:#47232a;color:#ffbec9}
+.auth-divider{display:flex;align-items:center;gap:10px;margin:14px 0;color:var(--soft);font-size:.78rem;font-weight:900;text-transform:uppercase;letter-spacing:.06em}
+.auth-divider:before,.auth-divider:after{content:"";height:1px;flex:1;background:var(--line)}
+.account-card small{display:block}
+.family-invite-card{margin:14px 0;padding:14px;border:1.5px solid var(--line);border-radius:18px;background:color-mix(in srgb,var(--lav) 8%,var(--card))}
+.invite-card-heading{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+.invite-card-heading>span{display:grid;place-items:center;width:40px;height:40px;flex:0 0 40px;border-radius:13px;background:color-mix(in srgb,var(--lav) 18%,var(--card));font-size:20px}
+.invite-card-heading b,.invite-card-heading small{display:block}
+.invite-card-heading small{color:var(--soft);margin-top:2px;line-height:1.35}
+.invite-email-form{margin-bottom:9px}
+.invite-input-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-top:6px}
+.invite-input-row button{min-height:46px;white-space:nowrap}
+.invite-result{display:grid;justify-items:center;gap:6px;margin-top:10px;padding:12px;border:1.5px dashed var(--line);border-radius:14px;background:var(--card);text-align:center}
+.invite-result small{color:var(--soft);font-weight:800;line-height:1.4}
+.invite-code-button{min-height:50px;padding:8px 14px;border:0;border-radius:12px;background:var(--bg2);color:var(--ink);font-size:1.45rem;font-weight:900;letter-spacing:.22em}
+.invite-code-button:focus-visible,button:focus-visible{outline:3px solid var(--sun2);outline-offset:2px}
+button:disabled{cursor:not-allowed;opacity:.55}
+@media (max-width:520px){.invite-input-row{grid-template-columns:1fr}.invite-input-row button{width:100%}}
+@media (prefers-reduced-motion:reduce){.view{animation:none}}

@@ -58,7 +58,10 @@ Daysie is a beautiful, accessible reminder and journal app designed for **people
 - **Screen reader ready** — ARIA labels throughout
 
 ### ☁️ **Sync Across Devices** (Optional)
-- **Device pairing** — No email, no passwords! Link devices with a short code plus an approve tap on a device you're already signed in on
+- **Secure accounts** — Sign up and sign in with email and password, powered by Better Auth
+- **Bot protection** — Cloudflare Turnstile protects sign-up and sign-in
+- **Device pairing** — Link another device with a short code and an approve tap
+- **Family invitations** — Invite relatives by email or share the existing short code
 - **Cloud sync** — Your data syncs across all your devices (powered by Cloudflare D1)
 - **Real push notifications** — Get reminders even when the app is closed (when deployed with Cloudflare Worker)
 - **Privacy-first** — Your data is encrypted and scoped to your account only
@@ -95,7 +98,7 @@ Want sync across devices and real push notifications? See **[DEPLOYMENT.md](DEPL
 **What you'll get:**
 - Sync between Grandma's phone and your laptop
 - Push notifications even when the app is closed
-- Code-based device pairing with approve-on-source-device (no email, no passwords!)
+- Email/password sign-in plus code-based device pairing with approve-on-source-device
 
 **Requirements:**
 - Cloudflare account (free tier works)
@@ -108,7 +111,8 @@ Want sync across devices and real push notifications? See **[DEPLOYMENT.md](DEPL
 - **Storage:** LocalStorage (offline-first) + Cloudflare D1 (optional sync)
 - **Backend:** Cloudflare Workers (optional, for sync + push)
 - **PWA:** Service Worker, Web App Manifest
-- **Auth:** Device pairing codes with approve-on-source-device (no email, passwordless)
+- **Auth:** Better Auth email/password sessions plus backwards-compatible device pairing codes
+- **Abuse protection:** Cloudflare Turnstile with server-enforced verification
 - **Push:** Web Push API + VAPID
 - **Hosting:** Cloudflare Pages
 

@@ -1,0 +1,20 @@
+{
+  "name": "daysie",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check worker.js && node --check auth.js && node --check app.js && node --check app2.js && node --check app3.js && node --check auth-ui.js",
+    "test": "node --test tests/*.test.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "better-auth": "1.6.23",
+    "better-auth-cloudflare": "0.3.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "4.20260702.1",
+    "wrangler": "4.102.0"
+  }
+}

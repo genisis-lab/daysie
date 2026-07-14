@@ -1,14 +1,58 @@
+import {
+  createDaysieAuth,
+  familyInviteEmail,
+  sendDaysieEmail,
+} from "./auth.js";
+
 let e = !1;
 export default {
-  async fetch(e, E) {
+  async fetch(e, E, executionContext) {
     const p = new URL(e.url).pathname,
       m = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, POST, DELETE, PUT, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Allow-Headers":
+          "Content-Type, Authorization, X-Daysie-Legacy-Token",
+        "Access-Control-Expose-Headers": "set-auth-token",
       };
     if ("OPTIONS" === e.method) return new Response(null, { headers: m });
     try {
+      if (p.startsWith("/api/auth/")) {
+        let authRequest = e;
+        if (
+          "POST" === e.method &&
+          ("/api/auth/sign-in/email" === p || "/api/auth/sign-up/email" === p)
+        ) {
+          const payload = await e.json().catch(() => ({}));
+          const turnstileToken = String(payload.turnstileToken || "");
+          if (!turnstileToken)
+            return c({ error: "Complete the security check" }, 400, m);
+          const verification = await verifyTurnstileToken(E, turnstileToken);
+          if (
+            !verification.success ||
+            verification.action !== "turnstile-spin-v1"
+          )
+            return c({ error: "Security check failed. Please try again." }, 403, m);
+          delete payload.turnstileToken;
+          authRequest = new Request(e.url, {
+            method: e.method,
+            headers: e.headers,
+            body: JSON.stringify(payload),
+          });
+        }
+        const response = await createDaysieAuth(
+          E,
+          authRequest,
+          executionContext,
+        ).handler(authRequest);
+        const headers = new Headers(response.headers);
+        Object.entries(m).forEach(([name, value]) => headers.set(name, value));
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        });
+      }
       if ((await i(E), "/health" === p && "GET" === e.method)) {
         let r = !1;
         try {
@@ -423,9 +467,21 @@ export default {
         if (!i) return c({ error: "Unauthorized" }, 401, m);
         const a = await e.json().catch(() => ({})),
           n = await t(E, i, a.name, a.emoji, a.color);
+        const inviteEmail = String(a.email || "").trim().toLowerCase();
+        if (
+          inviteEmail &&
+          !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(inviteEmail)
+        )
+          return c({ error: "Enter a valid email address" }, 400, m);
+        if (inviteEmail && !(await u(E, `finvite:${i}`, 8, 36e5)))
+          return c(
+            { error: "Too many invitations. Please wait before trying again." },
+            429,
+            m,
+          );
         let s;
-        await E.DB.prepare("DELETE FROM family_invites WHERE family_id = ?")
-          .bind(n)
+        await E.DB.prepare("DELETE FROM family_invites WHERE expires < ?")
+          .bind(Date.now())
           .run();
         for (let e = 0; e < 5; e++) {
           s = o(6);
@@ -441,11 +497,32 @@ export default {
         const d = Date.now() + 9e5;
         return (
           await E.DB.prepare(
-            "INSERT INTO family_invites (code, family_id, created, expires) VALUES (?, ?, ?, ?)",
+            "INSERT INTO family_invites (code, family_id, created, expires, invited_email, inviter_user_id) VALUES (?, ?, ?, ?, ?, ?)",
           )
-            .bind(s, n, Date.now(), d)
+            .bind(s, n, Date.now(), d, inviteEmail || null, i)
             .run(),
-          c({ code: s, expires: d }, 200, m)
+          inviteEmail &&
+            (await sendDaysieEmail(E, {
+              to: inviteEmail,
+              ...familyInviteEmail({
+                appUrl:
+                  String(E.APP_URL || "").replace(/\/$/, "") ||
+                  e.headers.get("Origin") ||
+                  new URL(e.url).origin,
+                code: s,
+                inviterName: d(a.name, 40) || "A family member",
+              }),
+            })),
+          c(
+            {
+              code: s,
+              expires: d,
+              emailSent: !!inviteEmail,
+              invitedEmail: inviteEmail || null,
+            },
+            200,
+            m,
+          )
         );
       }
       if ("/family/join" === p && "POST" === e.method) {
@@ -970,7 +1047,17 @@ async function r(e, r) {
     )
       .bind(t)
       .first();
-  return !a || a.expires < Date.now() ? null : a.user_id;
+  if (a && a.expires >= Date.now()) return a.user_id;
+  if (!r.BETTER_AUTH_SECRET) return null;
+  try {
+    const authSession = await createDaysieAuth(r, e).api.getSession({
+      headers: e.headers,
+    });
+    return authSession?.user?.id || null;
+  } catch (error) {
+    console.error("Better Auth session lookup failed", error);
+    return null;
+  }
 }
 async function i(r) {
   if (e) return;
@@ -999,6 +1086,16 @@ async function i(r) {
   try {
     await r.DB.prepare(
       "ALTER TABLE pair_codes ADD COLUMN session_token TEXT",
+    ).run();
+  } catch (r) {}
+  try {
+    await r.DB.prepare(
+      "ALTER TABLE family_invites ADD COLUMN invited_email TEXT",
+    ).run();
+  } catch (r) {}
+  try {
+    await r.DB.prepare(
+      "ALTER TABLE family_invites ADD COLUMN inviter_user_id TEXT",
     ).run();
   } catch (r) {}
   e = !0;
@@ -1147,6 +1244,20 @@ function c(e, r = 200, i = {}) {
     status: r,
     headers: { "Content-Type": "application/json", ...i },
   });
+}
+async function verifyTurnstileToken(env, token) {
+  if (!env.TURNSTILE_VERIFY_URL)
+    return { success: false, "error-codes": ["verification-not-configured"] };
+  try {
+    const response = await fetch(env.TURNSTILE_VERIFY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    return await response.json();
+  } catch {
+    return { success: false, "error-codes": ["verification-unavailable"] };
+  }
 }
 function isSafePushEndpoint(e) {
   try {

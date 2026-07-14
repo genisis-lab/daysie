@@ -12,6 +12,11 @@
     <link rel="apple-touch-icon" href="favicon.svg" />
     <link rel="manifest" href="site.webmanifest" />
     <link rel="stylesheet" href="styles.css" />
+    <script
+      src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+      async
+      defer
+    ></script>
   </head>
   <body>
     <canvas id="garden"></canvas>
@@ -421,8 +426,8 @@
 
         <div id="familySyncGate" class="hidden">
           <p style="color: var(--soft); font-weight: 700">
-            Turn on sync first to link family members. Open Settings → ☁️ Turn
-            on sync, then come back here.
+            Sign in first to link family members. Open Settings → Sync &amp;
+            account, then come back here.
           </p>
         </div>
 
@@ -572,16 +577,67 @@
         <h3><span class="inline-icon">☁️</span>Sync & account</h3>
         <div id="accountSection">
           <div id="loggedOutSection">
-            <p style="color: var(--soft)">
-              Sync Daysie across your devices — no email, no password. Turn on
-              sync here, then link your other devices with a short code.
-            </p>
-            <button type="button" id="enableSyncBtn" class="primary wide">
-              <span class="inline-icon">☁️</span>Turn on sync
-            </button>
-            <div style="text-align: center; margin: 10px 0; color: var(--soft)">
-              — or —
+            <div class="auth-intro">
+              <span class="auth-mark" aria-hidden="true">🌼</span>
+              <div>
+                <b>Keep your family in sync</b>
+                <p>Sign in to safely sync your reminders and invite family by email.</p>
+              </div>
             </div>
+            <div class="auth-tabs" role="tablist" aria-label="Account options">
+              <button type="button" id="showSignInBtn" role="tab" aria-selected="true">Sign in</button>
+              <button type="button" id="showSignUpBtn" role="tab" aria-selected="false">Create account</button>
+            </div>
+            <form id="signInForm" class="auth-form">
+              <label for="signInEmail">Email address</label>
+              <input id="signInEmail" type="email" autocomplete="email" required placeholder="you@example.com" />
+              <label for="signInPassword">Password</label>
+              <input id="signInPassword" type="password" autocomplete="current-password" minlength="8" required />
+              <div class="turnstile-wrap">
+                <div
+                  class="cf-turnstile"
+                  data-sitekey="0x4AAAAAAD1eKHXmRxrFBoyl"
+                  data-action="turnstile-spin-v1"
+                  data-theme="auto"
+                ></div>
+              </div>
+              <button type="submit" id="signInBtn" class="primary wide">Sign in</button>
+              <button type="button" id="forgotPasswordBtn" class="text-button">Forgot password?</button>
+            </form>
+            <form id="signUpForm" class="auth-form hidden">
+              <label for="signUpName">Your name</label>
+              <input id="signUpName" maxlength="40" autocomplete="name" required placeholder="e.g. Alex" />
+              <label for="signUpEmail">Email address</label>
+              <input id="signUpEmail" type="email" autocomplete="email" required placeholder="you@example.com" />
+              <label for="signUpPassword">Password</label>
+              <input id="signUpPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required aria-describedby="passwordHint" />
+              <small id="passwordHint" class="field-hint">Use at least 8 characters.</small>
+              <div class="turnstile-wrap">
+                <div
+                  class="cf-turnstile"
+                  data-sitekey="0x4AAAAAAD1eKHXmRxrFBoyl"
+                  data-action="turnstile-spin-v1"
+                  data-theme="auto"
+                ></div>
+              </div>
+              <button type="submit" id="signUpBtn" class="primary wide">Create account</button>
+            </form>
+            <form id="passwordResetRequestForm" class="auth-form hidden">
+              <button type="button" id="backToSignInBtn" class="text-button auth-back">← Back to sign in</button>
+              <h4>Reset your password</h4>
+              <p class="field-hint">We’ll email you a secure reset link.</p>
+              <label for="resetEmail">Email address</label>
+              <input id="resetEmail" type="email" autocomplete="email" required placeholder="you@example.com" />
+              <button type="submit" id="sendResetBtn" class="primary wide">Email reset link</button>
+            </form>
+            <form id="newPasswordForm" class="auth-form hidden">
+              <h4>Choose a new password</h4>
+              <label for="newPassword">New password</label>
+              <input id="newPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required />
+              <button type="submit" id="saveNewPasswordBtn" class="primary wide">Save new password</button>
+            </form>
+            <p id="authFormStatus" class="form-status hidden" role="status" aria-live="polite"></p>
+            <div class="auth-divider"><span>or use a device code</span></div>
             <button type="button" id="haveCodeBtn" class="soft wide">
               <span class="inline-icon">🔢</span>I have a code from another
               device
@@ -619,11 +675,34 @@
               <div>
                 <b>Sync is on</b>
                 <small>Synced across your linked devices</small>
+                <small id="accountEmail" class="hidden"></small>
                 <small id="deviceUserId">Account connected</small>
                 <small id="sessionStatus">Checking linked devices…</small>
                 <small id="photoStorageStatus">Checking cloud photos…</small>
               </div>
             </div>
+            <section class="family-invite-card" aria-labelledby="familyInviteSettingsTitle">
+              <div class="invite-card-heading">
+                <span aria-hidden="true">👪</span>
+                <div>
+                  <b id="familyInviteSettingsTitle">Invite family</b>
+                  <small>Email an invite, or share a short code.</small>
+                </div>
+              </div>
+              <form id="settingsFamilyInviteForm" class="invite-email-form">
+                <label for="settingsFamilyEmail">Family member’s email</label>
+                <div class="invite-input-row">
+                  <input id="settingsFamilyEmail" type="email" autocomplete="email" required placeholder="family@example.com" />
+                  <button type="submit" id="settingsFamilyInviteBtn" class="primary">Send invite</button>
+                </div>
+              </form>
+              <button type="button" id="settingsFamilyCodeBtn" class="soft wide">Create a shareable code</button>
+              <div id="settingsFamilyInviteResult" class="invite-result hidden" role="status" aria-live="polite">
+                <small id="settingsFamilyInviteMessage"></small>
+                <button type="button" id="copyFamilyInviteCode" class="invite-code-button" aria-label="Copy family invite code"></button>
+                <small id="settingsFamilyInviteExpiry"></small>
+              </div>
+            </section>
             <button
               type="button"
               id="linkDeviceBtn"
@@ -889,5 +968,6 @@
     <script src="app.js" defer></script>
     <script defer src="app2.js"></script>
     <script defer src="app3.js"></script>
+    <script defer src="auth-ui.js"></script>
   </body>
 </html>

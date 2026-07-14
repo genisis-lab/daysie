@@ -537,7 +537,7 @@ const tourSlides = [
   {
     icon: "☁️",
     title: "Sync your devices",
-    body: "Open Settings → Turn on sync to keep everything in step across phones and tablets — no email needed.",
+    body: "Open Settings → Create an account to keep everything in step across phones and tablets.",
   },
 ];
 let tourIndex = 0;

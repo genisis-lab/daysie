@@ -1,18 +1,31 @@
 # Cloudflare Worker configuration for Daysie
 name = "daysie-api"
 main = "worker.js"
-compatibility_date = "2024-01-01"
+compatibility_date = "2026-06-24"
+compatibility_flags = ["nodejs_compat"]
 
 # D1 Database binding
 [[d1_databases]]
 binding = "DB"
 database_name = "daysie-db"
-database_id = "YOUR_D1_DATABASE_ID" # Replace after creating: wrangler d1 create daysie-db
+database_id = "df029eb9-5b08-4391-b81d-f6702df1626e"
+
+[vars]
+APP_URL = "https://daysie.pages.dev"
+TURNSTILE_VERIFY_URL = "https://turnstile-siteverify-daysie.neil27.workers.dev/"
 
 # Cron trigger for scheduled push notifications (runs every minute)
 [triggers]
 crons = ["* * * * *"]
 
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 # Environment variables (add via wrangler secret put)
 # VAPID_PUBLIC_KEY - Generate with: npx web-push generate-vapid-keys
 # VAPID_PRIVATE_KEY
+# BETTER_AUTH_SECRET - Generate with: openssl rand -base64 32
+# RESEND_API_KEY - Used for password resets and family invitations
+# EMAIL_FROM - A verified sender, e.g. "Daysie <hello@yourdomain.com>"
+# APP_URL - Public frontend origin, e.g. "https://daysie.pages.dev"
