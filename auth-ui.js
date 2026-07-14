@@ -262,8 +262,15 @@ $("#settingsFamilyInviteForm")?.addEventListener("submit", async (event) => {
   const button = $("#settingsFamilyInviteBtn");
   setButtonBusy(button, true, "Sending…");
   try {
-    await createFamilyInviteFromSettings($("#settingsFamilyEmail").value);
-    toast("Invite sent", "Your family member should receive it shortly.");
+    const invite = await createFamilyInviteFromSettings(
+      $("#settingsFamilyEmail").value,
+    );
+    toast(
+      invite.emailSent ? "Invite sent" : "Invite code ready",
+      invite.emailSent
+        ? "Your family member should receive it shortly."
+        : invite.emailError || "Share the displayed code with your family member.",
+    );
   } catch (error) {
     toast("Could not send invite", error.message);
   } finally {

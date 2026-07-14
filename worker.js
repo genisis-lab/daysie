@@ -495,14 +495,16 @@ export default {
             break;
         }
         const d = Date.now() + 9e5;
-        return (
-          await E.DB.prepare(
-            "INSERT INTO family_invites (code, family_id, created, expires, invited_email, inviter_user_id) VALUES (?, ?, ?, ?, ?, ?)",
-          )
-            .bind(s, n, Date.now(), d, inviteEmail || null, i)
-            .run(),
-          inviteEmail &&
-            (await sendDaysieEmail(E, {
+        await E.DB.prepare(
+          "INSERT INTO family_invites (code, family_id, created, expires, invited_email, inviter_user_id) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+          .bind(s, n, Date.now(), d, inviteEmail || null, i)
+          .run();
+        let emailSent = !1,
+          emailError = null;
+        if (inviteEmail)
+          try {
+            await sendDaysieEmail(E, {
               to: inviteEmail,
               ...familyInviteEmail({
                 appUrl:
@@ -512,17 +514,22 @@ export default {
                 code: s,
                 inviterName: d(a.name, 40) || "A family member",
               }),
-            })),
-          c(
-            {
-              code: s,
-              expires: d,
-              emailSent: !!inviteEmail,
-              invitedEmail: inviteEmail || null,
-            },
-            200,
-            m,
-          )
+            });
+            emailSent = !0;
+          } catch (error) {
+            console.error("Family invitation email failed", error);
+            emailError = "Email delivery is unavailable. Share the invite code instead.";
+          }
+        return c(
+          {
+            code: s,
+            expires: d,
+            emailSent,
+            emailError,
+            invitedEmail: inviteEmail || null,
+          },
+          200,
+          m,
         );
       }
       if ("/family/join" === p && "POST" === e.method) {
