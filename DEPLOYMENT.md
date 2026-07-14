@@ -26,7 +26,7 @@ wrangler login
 wrangler d1 create daysie-db
 ```
 
-Copy the `database_id` from the output and paste it into `wrangler.toml` (replace `YOUR_D1_DATABASE_ID`).
+Copy the `database_id` from the output and use it for the `DB` binding in `wrangler.toml`.
 
 ### Step 3: Run Database Schema
 
@@ -41,7 +41,47 @@ tables:
 wrangler d1 execute daysie-db --file=migrations/0001_security_hardening.sql
 ```
 
-### Step 4: Generate VAPID Keys (for Web Push)
+Then add Better Auth and email invitations:
+
+```bash
+npx wrangler d1 execute daysie-db --remote --file=migrations/0002_better_auth_and_email_invites.sql
+```
+
+### Step 4: Configure Better Auth and email
+
+Generate and store a Better Auth secret:
+
+```bash
+openssl rand -base64 32 | npx wrangler secret put BETTER_AUTH_SECRET
+```
+
+Daysie uses Resend for password-reset and family-invitation emails. Create a
+Resend API key, verify the sender domain, then add these Worker secrets:
+
+```bash
+npx wrangler secret put RESEND_API_KEY
+npx wrangler secret put EMAIL_FROM
+```
+
+- `EMAIL_FROM`: a verified sender such as `Daysie <hello@yourdomain.com>`
+- `APP_URL`: the public frontend origin. This non-secret value is configured in
+  `wrangler.toml` as `https://daysie.pages.dev`.
+
+Never put API keys or sender credentials directly in `wrangler.toml` or commit
+them to Git.
+
+Email confirmation is intentionally disabled. Accounts receive a session as
+soon as email/password sign-up succeeds.
+
+### Turnstile protection
+
+The sign-in and sign-up forms use the managed Turnstile widget registered for
+`daysie.pages.dev`, `localhost`, and `127.0.0.1`. The public widget key is safe
+to keep in `index.html`. The `daysie-api` Worker validates every submitted
+token through the managed `turnstile-siteverify-daysie` Worker before invoking
+Better Auth; direct requests without a valid token are rejected.
+
+### Step 5: Generate VAPID Keys (for Web Push)
 
 ```bash
 npx web-push generate-vapid-keys
@@ -57,7 +97,7 @@ wrangler secret put VAPID_PRIVATE_KEY
 # Paste the private key when prompted
 ```
 
-### Step 5: Update app.js with Your Worker URL
+### Step 6: Update app.js with Your Worker URL
 
 In `app.js`, replace **all instances** of:
 
@@ -69,15 +109,16 @@ with your actual Worker URL (you'll get this after deploying).
 
 Also replace `YOUR_VAPID_PUBLIC_KEY` in the `subscribePushBtn` onclick handler with your actual VAPID public key.
 
-### Step 6: Deploy Worker
+### Step 7: Install dependencies and deploy the Worker
 
 ```bash
+npm install
 wrangler deploy
 ```
 
 You'll get a URL like `https://daysie-api.YOUR-SUBDOMAIN.workers.dev`. Copy this URL.
 
-### Step 7: Update Frontend with Worker URL
+### Step 8: Update Frontend with Worker URL
 
 1. Edit `app.js` locally
 2. Replace all `https://daysie-api.YOUR_SUBDOMAIN.workers.dev` with your actual Worker URL
@@ -85,25 +126,24 @@ You'll get a URL like `https://daysie-api.YOUR-SUBDOMAIN.workers.dev`. Copy this
 4. Push the updated `app.js` to GitHub
 5. Cloudflare Pages will auto-deploy the update
 
-### Step 8: Set Up Cron Trigger
+### Step 9: Set Up Cron Trigger
 
 The `wrangler.toml` already includes a cron trigger (`* * * * *` = every minute). This will check for due reminders and send push notifications even when the app is closed.
 
 ## Testing
 
-1. Open your Daysie site
-2. Go to Settings (⚙️)
-3. Click "Turn on sync" to create an account on this device
-4. On a second device, open Daysie → Settings → "I have a code"
-5. On the first device tap "Link another device", enter that code on the second device, then approve the prompt on the first device
-6. Create a task with a near-future reminder
-7. Enable push notifications when prompted
-8. Close the app and wait for the reminder time
-9. You should receive a push notification!
+1. Open Daysie and go to Settings.
+2. Create an account, sign out, then sign back in to verify the login flow.
+3. Send a family invitation to an email you can open and follow its link.
+4. Also create a shareable family code to verify the original code path.
+5. On a second device, choose “I have a code,” enter a device code, and approve it on the first device.
+6. Create a task with a near-future reminder and enable push notifications.
 
-## Device Pairing (how sign-in works)
+## Authentication and device pairing
 
-Daysie uses device pairing instead of email. The first device calls `/account/create` to make an account. To add another device, the signed-in device generates a short code (`/pair/create`); the new device submits it (`/pair/redeem`) and waits while the original device approves the request (`/pair/approve`). Codes are single-use, expire in ~3 minutes, are limited to one active code per account, and redeem attempts are rate-limited per IP. No email provider or domain is required.
+Better Auth handles email/password users, password hashing, sessions, and password resets under `/api/auth/*`. Daysie sends the returned bearer session token with its existing sync APIs, so the PWA remains compatible with the separate Worker origin.
+
+The original device-pairing flow remains available. A signed-in device generates a short code (`/pair/create`); the new device submits it (`/pair/redeem`) and waits while the original device approves (`/pair/approve`). Codes are single-use, expire in about three minutes, and redeem attempts are rate-limited per IP.
 
 ## Monitoring
 
@@ -113,10 +153,10 @@ View Worker logs:
 wrangler tail
 ```
 
-View D1 data:
+View Better Auth users in D1:
 
 ```bash
-wrangler d1 execute daysie-db --command="SELECT * FROM users"
+npx wrangler d1 execute daysie-db --remote --command='SELECT id, email, createdAt FROM "user"'
 ```
 
 ## Costs

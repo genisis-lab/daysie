@@ -95,6 +95,8 @@ let db = {
     font: "normal",
     authToken: null,
     userId: null,
+    authProvider: null,
+    authEmail: null,
     pushSubscription: null,
   },
   activeProfileId = "default",
@@ -115,7 +117,7 @@ let db = {
   taskFilter = "all",
   renagTimer = null,
   assignee = null;
-const APP_VERSION = "2026.06.09-18";
+const APP_VERSION = "2026.07.14-20";
 let swRegistration = null,
   updateBannerShown = !1;
 const save = () => {
@@ -1544,6 +1546,9 @@ function updateAccountUI() {
   settings.authToken
     ? ($("#loggedOutSection").classList.add("hidden"),
       $("#loggedInSection").classList.remove("hidden"),
+      $("#accountEmail") &&
+        ($("#accountEmail").textContent = settings.authEmail || "",
+        $("#accountEmail").classList.toggle("hidden", !settings.authEmail)),
       $("#deviceUserId") &&
         ($("#deviceUserId").textContent = settings.userId
           ? "Account: " + settings.userId.slice(0, 8) + "…"
@@ -1562,13 +1567,18 @@ async function refreshAccountDetails() {
   e && (e.textContent = "Checking linked devices…");
   t && (t.textContent = "Checking cloud photos…");
   try {
-    const t = await fetch(`${API}/sessions`, { headers: o });
+    const t = await fetch(
+      settings.authProvider === "better-auth"
+        ? `${API}/api/auth/list-sessions`
+        : `${API}/sessions`,
+      { headers: o },
+    );
     if (t.ok && e) {
       const o = await t.json(),
-        n = o.sessions || [],
+        n = Array.isArray(o) ? o : o.sessions || [],
         a = n.length,
         s = n.find((e) => e.current);
-      e.textContent = `${a} linked device${1 === a ? "" : "s"}${s ? " · this one ends " + new Date(s.expires).toLocaleDateString() : ""}`;
+      e.textContent = `${a} signed-in device${1 === a ? "" : "s"}${s && s.expires ? " · this one ends " + new Date(s.expires).toLocaleDateString() : ""}`;
     }
   } catch (t) {
     e && (e.textContent = "Could not check linked devices");
@@ -1779,6 +1789,8 @@ async function pullFromCloud() {
               ? (stopStatusPolling(),
                 (settings.authToken = a.token),
                 (settings.userId = a.userId),
+                (settings.authProvider = "device-code"),
+                (settings.authEmail = null),
                 saveSettings(),
                 updateAccountUI(),
                 updateSyncStatus(),
@@ -1870,11 +1882,18 @@ async function pullFromCloud() {
       "☁️",
       "Turn off sync on this device?",
       "Your data stays on this device. Other linked devices keep syncing.",
-      () => {
-        (stopPairPolling(),
+      async () => {
+        (settings.authProvider === "better-auth" &&
+          (await fetch(`${API}/api/auth/sign-out`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${settings.authToken}` },
+          }).catch(() => null)),
+          stopPairPolling(),
           stopStatusPolling(),
           (settings.authToken = null),
           (settings.userId = null),
+          (settings.authProvider = null),
+          (settings.authEmail = null),
           (settings.pushSubscription = null),
           saveSettings(),
           updateAccountUI(),
@@ -1894,10 +1913,15 @@ async function pullFromCloud() {
           try {
             if (
               !(
-                await fetch(`${API}/sessions/revoke-others`, {
+                await fetch(
+                  settings.authProvider === "better-auth"
+                    ? `${API}/api/auth/revoke-other-sessions`
+                    : `${API}/sessions/revoke-others`,
+                  {
                   method: "POST",
                   headers: { Authorization: `Bearer ${settings.authToken}` },
-                })
+                  },
+                )
               ).ok
             )
               throw new Error("revoke failed");
@@ -1957,30 +1981,11 @@ async function pullFromCloud() {
   }));
 let accountCreationPromise = null;
 async function ensureAccount() {
-  return (
-    !!settings.authToken ||
-    accountCreationPromise ||
-    ((accountCreationPromise = (async () => {
-      try {
-        const e = await fetch(`${API}/account/create`, { method: "POST" });
-        if (!e.ok) throw new Error("create failed");
-        const t = await e.json();
-        return (
-          (settings.authToken = t.token),
-          (settings.userId = t.userId),
-          saveSettings(),
-          updateAccountUI(),
-          updateSyncStatus(),
-          !0
-        );
-      } catch (e) {
-        return (console.error("Auto account error:", e), !1);
-      } finally {
-        accountCreationPromise = null;
-      }
-    })()),
-    accountCreationPromise)
-  );
+  if (settings.authToken) return !0;
+  updateAccountUI();
+  $("#settingsDialog")?.showModal();
+  $("#signInEmail")?.focus();
+  return !1;
 }
 async function enableNotifications() {
   if (isIOS() && !isStandalone())
