@@ -30,11 +30,12 @@ export default {
           if (!turnstileToken)
             return c({ error: "Complete the security check" }, 400, m);
           const verification = await verifyTurnstileToken(E, turnstileToken);
-          if (
-            !verification.success ||
-            verification.action !== "turnstile-spin-v1"
-          )
+          if (!verification.success) {
+            console.warn("Turnstile rejected an authentication request", {
+              errorCodes: verification["error-codes"] || [],
+            });
             return c({ error: "Security check failed. Please try again." }, 403, m);
+          }
           delete payload.turnstileToken;
           authRequest = new Request(e.url, {
             method: e.method,
