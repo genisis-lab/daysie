@@ -13,6 +13,8 @@ test("Better Auth is mounted with D1, email/password, and bearer sessions", () =
   assert.match(worker, /p\.startsWith\("\/api\/auth\/"\)/);
   assert.match(auth, /d1Native:\s*env\.DB/);
   assert.match(auth, /emailAndPassword:\s*\{/);
+  assert.match(auth, /changeEmail:\s*\{/);
+  assert.match(auth, /updateEmailWithoutVerification:\s*true/);
   assert.match(auth, /enabled:\s*true/);
   assert.match(auth, /bearer\(\)/);
   assert.match(auth, /username\(\{/);
@@ -44,6 +46,12 @@ test("settings provides accessible sign-in, sign-up, reset, and family email inv
   assert.match(authUi, /\/sign-up\/email/);
   assert.match(authUi, /\/request-password-reset/);
   assert.match(authUi, /\/reset-password/);
+  assert.match(html, /id="signOutBtn"/);
+  assert.match(html, /id="changeEmailForm"/);
+  assert.match(html, /id="changePasswordForm"/);
+  assert.match(html, /id="sendPasswordResetBtn"/);
+  assert.match(authUi, /"\/change-email"/);
+  assert.match(authUi, /"\/change-password"/);
 });
 
 test("Turnstile protects sign-in and sign-up through the managed verification Worker", () => {

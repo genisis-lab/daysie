@@ -697,6 +697,35 @@
                 <small id="photoStorageStatus">Checking cloud photos…</small>
               </div>
             </div>
+            <section class="account-security-card" aria-labelledby="accountSecurityTitle">
+              <div class="account-security-heading">
+                <span aria-hidden="true">🔐</span>
+                <div>
+                  <b id="accountSecurityTitle">Account &amp; security</b>
+                  <small>Manage the email and password you use to sign in.</small>
+                </div>
+              </div>
+              <form id="changeEmailForm" class="auth-form account-security-form">
+                <label for="changeEmailInput">New email address</label>
+                <div class="account-action-row">
+                  <input id="changeEmailInput" type="email" autocomplete="email" required placeholder="you@example.com" />
+                  <button type="submit" id="changeEmailBtn" class="soft">Change email</button>
+                </div>
+                <small class="field-hint">Your email is updated immediately after your current session is confirmed.</small>
+              </form>
+              <form id="changePasswordForm" class="auth-form account-security-form">
+                <label for="currentPassword">Current password</label>
+                <input id="currentPassword" type="password" autocomplete="current-password" required />
+                <label for="newPassword">New password</label>
+                <input id="newPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required />
+                <label class="check-row" for="revokeOtherPasswordSessions">
+                  <input id="revokeOtherPasswordSessions" type="checkbox" checked />
+                  <span>Log out other devices after changing my password</span>
+                </label>
+                <button type="submit" id="changePasswordBtn" class="soft wide">Update password</button>
+              </form>
+              <button type="button" id="sendPasswordResetBtn" class="text-button">Email me a password reset link instead</button>
+            </section>
             <section class="family-invite-card" aria-labelledby="familyInviteSettingsTitle">
               <div class="invite-card-heading">
                 <span aria-hidden="true">👪</span>
@@ -779,7 +808,7 @@
               <span class="inline-icon">🧹</span>Clean unused cloud photos
             </button>
             <button type="button" id="signOutBtn" class="soft wide">
-              Turn off sync on this device
+              <span class="inline-icon">↪</span>Log out on this device
             </button>
           </div>
         </div>

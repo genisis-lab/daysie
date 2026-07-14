@@ -118,7 +118,7 @@ let db = {
   taskFilter = "all",
   renagTimer = null,
   assignee = null;
-const APP_VERSION = "2026.07.14-22";
+const APP_VERSION = "2026.07.14-23";
 let swRegistration = null,
   updateBannerShown = !1;
 const save = () => {
@@ -1890,7 +1890,7 @@ async function pullFromCloud() {
   ($("#signOutBtn").onclick = () => {
     confirm(
       "☁️",
-      "Turn off sync on this device?",
+      "Log out on this device?",
       "Your data stays on this device. Other linked devices keep syncing.",
       async () => {
         (settings.authProvider === "better-auth" &&
@@ -1909,7 +1909,7 @@ async function pullFromCloud() {
           saveSettings(),
           updateAccountUI(),
           updateSyncStatus(),
-          toast("👋 Sync turned off", ""));
+          toast("👋 Logged out", "Sync is off on this device."));
       },
       () => {},
     );
