@@ -56,6 +56,8 @@ test("Turnstile protects sign-in and sign-up through the managed verification Wo
   assert.match(worker, /env\.TURNSTILE_VERIFY_URL/);
   assert.match(html, /api\.js\?render=explicit/);
   assert.match(authUi, /window\.turnstile\.render/);
+  assert.match(authUi, /settingsDialog"\)\?\.open/);
+  assert.match(authUi, /form\.offsetParent === null/);
 });
 
 test("family invitations can be delivered by email without removing code invites", () => {

@@ -118,7 +118,7 @@ let db = {
   taskFilter = "all",
   renagTimer = null,
   assignee = null;
-const APP_VERSION = "2026.07.14-21";
+const APP_VERSION = "2026.07.14-22";
 let swRegistration = null,
   updateBannerShown = !1;
 const save = () => {

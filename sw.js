@@ -1,5 +1,5 @@
 // Daysie Service Worker - update-friendly caching + push notifications
-const CACHE_NAME = "daysie-v21";
+const CACHE_NAME = "daysie-v22";
 const CORE = [
   "./",
   "./index.html",

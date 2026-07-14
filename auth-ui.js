@@ -5,6 +5,8 @@ function renderTurnstile(form) {
   const widget = form?.querySelector(".cf-turnstile");
   if (
     !widget ||
+    !$("#settingsDialog")?.open ||
+    form.offsetParent === null ||
     form.classList.contains("hidden") ||
     turnstileWidgets.has(widget) ||
     !window.turnstile
@@ -229,6 +231,9 @@ async function joinPendingFamilyInvite() {
 
 $("#showSignInBtn")?.addEventListener("click", () => showAuthPanel("signIn"));
 $("#showSignUpBtn")?.addEventListener("click", () => showAuthPanel("signUp"));
+$("#settingsBtn")?.addEventListener("click", () =>
+  setTimeout(scheduleTurnstileRender, 0),
+);
 $("#welcomeSignInBtn")?.addEventListener("click", () => openAuthEntry("signIn"));
 $("#welcomeCreateAccountBtn")?.addEventListener("click", () => {
   $("#signUpName").value = $("#nameInput").value.trim();
