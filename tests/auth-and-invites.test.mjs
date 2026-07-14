@@ -54,6 +54,7 @@ test("family invitations can be delivered by email without removing code invites
   assert.match(worker, /inviteEmail/);
   assert.match(worker, /sendDaysieEmail/);
   assert.match(worker, /familyInviteEmail/);
+  assert.match(worker, /Email delivery is unavailable\. Share the invite code instead\./);
   assert.match(worker, /invited_email/);
   assert.match(authUi, /familyInvite/);
   assert.match(authUi, /\/family\/invite/);
