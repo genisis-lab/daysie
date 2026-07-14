@@ -52,7 +52,8 @@ test("Turnstile protects sign-in and sign-up through the managed verification Wo
   assert.match(authUi, /new FormData\(form\)\.get\("cf-turnstile-response"\)/);
   assert.match(authUi, /turnstileToken/);
   assert.match(worker, /verifyTurnstileToken\(E, turnstileToken\)/);
-  assert.match(worker, /verification\.action !== "turnstile-spin-v1"/);
+  assert.match(worker, /if \(!verification\.success\)/);
+  assert.doesNotMatch(worker, /verification\.action !==/);
   assert.match(worker, /env\.TURNSTILE_VERIFY_URL/);
   assert.match(html, /api\.js\?render=explicit/);
   assert.match(authUi, /window\.turnstile\.render/);
