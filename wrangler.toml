@@ -14,6 +14,13 @@ database_id = "df029eb9-5b08-4391-b81d-f6702df1626e"
 APP_URL = "https://daysie.pages.dev"
 TURNSTILE_VERIFY_URL = "https://turnstile-siteverify-daysie.neil27.workers.dev/"
 
+# Native Worker-to-Worker connection. Calling another workers.dev service with
+# global fetch can be rejected as a same-zone loop; a service binding is the
+# supported Cloudflare path and does not traverse the public Internet.
+[[services]]
+binding = "TURNSTILE_VERIFY"
+service = "turnstile-siteverify-daysie"
+
 # Cron trigger for scheduled push notifications (runs every minute)
 [triggers]
 crons = ["* * * * *"]

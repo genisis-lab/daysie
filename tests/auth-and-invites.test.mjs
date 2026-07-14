@@ -7,6 +7,7 @@ const auth = readFileSync(new URL("../auth.js", import.meta.url), "utf8");
 const authUi = readFileSync(new URL("../auth-ui.js", import.meta.url), "utf8");
 const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const schema = readFileSync(new URL("../schema.sql", import.meta.url), "utf8");
+const wrangler = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
 
 test("Better Auth is mounted with D1, email/password, and bearer sessions", () => {
   assert.match(worker, /p\.startsWith\("\/api\/auth\/"\)/);
@@ -55,6 +56,9 @@ test("Turnstile protects sign-in and sign-up through the managed verification Wo
   assert.match(worker, /if \(!verification\.success\)/);
   assert.doesNotMatch(worker, /verification\.action !==/);
   assert.match(worker, /env\.TURNSTILE_VERIFY_URL/);
+  assert.match(worker, /env\.TURNSTILE_VERIFY/);
+  assert.match(wrangler, /binding = "TURNSTILE_VERIFY"/);
+  assert.match(wrangler, /service = "turnstile-siteverify-daysie"/);
   assert.match(html, /api\.js\?render=explicit/);
   assert.match(authUi, /window\.turnstile\.render/);
   assert.match(authUi, /settingsDialog"\)\?\.open/);

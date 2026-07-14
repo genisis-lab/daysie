@@ -1256,16 +1256,20 @@ function c(e, r = 200, i = {}) {
   });
 }
 async function verifyTurnstileToken(env, token) {
-  if (!env.TURNSTILE_VERIFY_URL)
+  if (!env.TURNSTILE_VERIFY && !env.TURNSTILE_VERIFY_URL)
     return { success: false, "error-codes": ["verification-not-configured"] };
   try {
-    const response = await fetch(env.TURNSTILE_VERIFY_URL, {
+    const verifier = env.TURNSTILE_VERIFY || globalThis;
+    const response = await verifier.fetch(env.TURNSTILE_VERIFY_URL || "https://turnstile-verifier/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token }),
     });
     return await response.json();
-  } catch {
+  } catch (error) {
+    console.error("Turnstile verification service unavailable", {
+      message: error instanceof Error ? error.message : String(error),
+    });
     return { success: false, "error-codes": ["verification-unavailable"] };
   }
 }
