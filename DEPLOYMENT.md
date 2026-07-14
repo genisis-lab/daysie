@@ -47,6 +47,12 @@ Then add Better Auth and email invitations:
 npx wrangler d1 execute daysie-db --remote --file=migrations/0002_better_auth_and_email_invites.sql
 ```
 
+Enable unique usernames for new and existing accounts:
+
+```bash
+npx wrangler d1 execute daysie-db --remote --file=migrations/0003_usernames.sql
+```
+
 ### Step 4: Configure Better Auth and email
 
 Generate and store a Better Auth secret:
@@ -141,7 +147,11 @@ The `wrangler.toml` already includes a cron trigger (`* * * * *` = every minute)
 
 ## Authentication and device pairing
 
-Better Auth handles email/password users, password hashing, sessions, and password resets under `/api/auth/*`. Daysie sends the returned bearer session token with its existing sync APIs, so the PWA remains compatible with the separate Worker origin.
+Better Auth handles email/password users, unique usernames, password hashing,
+sessions, and password resets under `/api/auth/*`. Users can sign in with either
+their email address or username. Daysie sends the returned bearer session token
+with its existing sync APIs, so the PWA remains compatible with the separate
+Worker origin.
 
 The original device-pairing flow remains available. A signed-in device generates a short code (`/pair/create`); the new device submits it (`/pair/redeem`) and waits while the original device approves (`/pair/approve`). Codes are single-use, expire in about three minutes, and redeem attempts are rate-limited per IP.
 

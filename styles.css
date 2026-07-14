@@ -344,6 +344,10 @@ dialog{max-width:min(560px,calc(100vw - 24px));overflow:hidden}
 
 /* Account and family invitations */
 .auth-intro{display:flex;align-items:center;gap:12px;padding:14px;border:1.5px solid #f3dba8;border-radius:18px;background:linear-gradient(135deg,#fff8df,#fff1e6);margin-bottom:14px}
+.welcome-account-actions{display:grid;gap:9px;width:min(100%,430px);margin:18px auto 0}
+.welcome .auth-divider{width:min(100%,430px);margin:15px auto 11px}
+.welcome-name-label{display:block;width:min(100%,430px);margin:0 auto 6px;text-align:left;font-size:.84rem;font-weight:900;color:var(--soft)}
+.welcome #nameInput,.welcome #startBtn{width:min(100%,430px)}
 .auth-intro>div,.invite-card-heading>div{min-width:0}
 .auth-intro .auth-mark{display:grid;place-items:center;flex:0 0 46px;width:46px;height:46px;border-radius:15px;background:#fff;font-size:25px;box-shadow:0 8px 18px #b46f1320}
 .auth-intro b{display:block;font-size:1.05rem}

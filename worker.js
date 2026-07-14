@@ -21,7 +21,9 @@ export default {
         let authRequest = e;
         if (
           "POST" === e.method &&
-          ("/api/auth/sign-in/email" === p || "/api/auth/sign-up/email" === p)
+          ("/api/auth/sign-in/email" === p ||
+            "/api/auth/sign-in/username" === p ||
+            "/api/auth/sign-up/email" === p)
         ) {
           const payload = await e.json().catch(() => ({}));
           const turnstileToken = String(payload.turnstileToken || "");

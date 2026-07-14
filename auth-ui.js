@@ -1,4 +1,36 @@
 const PENDING_FAMILY_INVITE_KEY = "daysie.pendingFamilyInvite";
+const turnstileWidgets = new WeakMap();
+
+function renderTurnstile(form) {
+  const widget = form?.querySelector(".cf-turnstile");
+  if (
+    !widget ||
+    form.classList.contains("hidden") ||
+    turnstileWidgets.has(widget) ||
+    !window.turnstile
+  )
+    return false;
+  const widgetId = window.turnstile.render(widget, {
+    sitekey: widget.dataset.sitekey,
+    action: widget.dataset.action,
+    theme: widget.dataset.theme || "auto",
+    appearance: widget.dataset.appearance || "always",
+  });
+  turnstileWidgets.set(widget, widgetId);
+  return true;
+}
+
+function renderVisibleTurnstile() {
+  return renderTurnstile($("#signInForm")) || renderTurnstile($("#signUpForm"));
+}
+
+function scheduleTurnstileRender() {
+  let attempts = 0;
+  const timer = setInterval(() => {
+    attempts += 1;
+    if (renderVisibleTurnstile() || attempts >= 40) clearInterval(timer);
+  }, 125);
+}
 
 function setAuthStatus(message, isError = false) {
   const status = $("#authFormStatus");
@@ -40,6 +72,19 @@ function showAuthPanel(panel) {
     String(panel === "signUp"),
   );
   setAuthStatus("");
+  setTimeout(scheduleTurnstileRender, 0);
+}
+
+function openAuthEntry(panel) {
+  updateAccountUI();
+  showAuthPanel(panel);
+  const dialog = $("#settingsDialog");
+  if (!dialog?.open) dialog?.showModal();
+  setTimeout(() => {
+    $("#loggedOutSection")?.scrollIntoView({ block: "start" });
+    scheduleTurnstileRender();
+    (panel === "signUp" ? $("#signUpName") : $("#signInIdentifier"))?.focus();
+  }, 50);
 }
 
 async function authRequest(path, body, token) {
@@ -64,7 +109,7 @@ function resetTurnstile(form) {
   const widget = form?.querySelector(".cf-turnstile");
   if (!widget || !window.turnstile) return;
   try {
-    window.turnstile.reset(widget);
+    window.turnstile.reset(turnstileWidgets.get(widget));
   } catch {
     // The widget may not have rendered yet while its auth tab was hidden.
   }
@@ -88,14 +133,34 @@ async function finishEmailAuth(result, email, isNewAccount) {
   settings.userId = user.id;
   settings.authProvider = "better-auth";
   settings.authEmail = user.email || email;
+  settings.authUsername = user.username || null;
+  const wasFirstRun = !db.onboarded;
   saveSettings();
   updateAccountUI();
   updateSyncStatus();
   setAuthStatus("");
   toast("Welcome to Daysie", isNewAccount ? "Your account is ready." : "You’re signed in.");
-  if (isNewAccount) await syncToCloud();
-  else await pullFromCloud();
+  if (isNewAccount) {
+    if (wasFirstRun) {
+      db.profiles[0].name = user.name || "friend";
+      db.onboarded = true;
+      localStorage.setItem(KEY, JSON.stringify(db));
+    }
+    await syncToCloud();
+  } else {
+    await pullFromCloud();
+    if (wasFirstRun) {
+      db.onboarded = true;
+      if (db.profiles?.[0]) db.profiles[0].name ||= user.name || "friend";
+      localStorage.setItem(KEY, JSON.stringify(db));
+    }
+  }
   await joinPendingFamilyInvite();
+  if (wasFirstRun) {
+    showApp();
+    if (!db.tourDone) setTimeout(startTour, 400);
+  }
+  $("#settingsDialog")?.close();
 }
 
 async function createFamilyInviteFromSettings(email = "") {
@@ -164,8 +229,14 @@ async function joinPendingFamilyInvite() {
 
 $("#showSignInBtn")?.addEventListener("click", () => showAuthPanel("signIn"));
 $("#showSignUpBtn")?.addEventListener("click", () => showAuthPanel("signUp"));
+$("#welcomeSignInBtn")?.addEventListener("click", () => openAuthEntry("signIn"));
+$("#welcomeCreateAccountBtn")?.addEventListener("click", () => {
+  $("#signUpName").value = $("#nameInput").value.trim();
+  openAuthEntry("signUp");
+});
 $("#forgotPasswordBtn")?.addEventListener("click", () => {
-  $("#resetEmail").value = $("#signInEmail").value;
+  const identifier = $("#signInIdentifier").value.trim();
+  $("#resetEmail").value = identifier.includes("@") ? identifier : "";
   showAuthPanel("reset");
   $("#resetEmail")?.focus();
 });
@@ -179,14 +250,15 @@ $("#signInForm")?.addEventListener("submit", async (event) => {
   setAuthStatus("");
   try {
     const turnstileToken = getTurnstileToken(form);
-    const email = $("#signInEmail").value.trim().toLowerCase();
-    const result = await authRequest("/sign-in/email", {
-      email,
+    const identifier = $("#signInIdentifier").value.trim().toLowerCase();
+    const useEmail = identifier.includes("@");
+    const result = await authRequest(useEmail ? "/sign-in/email" : "/sign-in/username", {
+      [useEmail ? "email" : "username"]: identifier,
       password: $("#signInPassword").value,
       rememberMe: true,
       turnstileToken,
     });
-    await finishEmailAuth(result, email, false);
+    await finishEmailAuth(result, useEmail ? identifier : "", false);
   } catch (error) {
     setAuthStatus(error.message, true);
   } finally {
@@ -206,6 +278,7 @@ $("#signUpForm")?.addEventListener("submit", async (event) => {
     const email = $("#signUpEmail").value.trim().toLowerCase();
     const result = await authRequest("/sign-up/email", {
       name: $("#signUpName").value.trim(),
+      username: $("#signUpUsername").value.trim().toLowerCase(),
       email,
       password: $("#signUpPassword").value,
       turnstileToken,
@@ -323,3 +396,5 @@ $("#copyFamilyInviteCode")?.addEventListener("click", async (event) => {
     showAuthPanel("newPassword");
   }
 })();
+
+scheduleTurnstileRender();

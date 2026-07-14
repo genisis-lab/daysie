@@ -58,7 +58,7 @@ Daysie is a beautiful, accessible reminder and journal app designed for **people
 - **Screen reader ready** — ARIA labels throughout
 
 ### ☁️ **Sync Across Devices** (Optional)
-- **Secure accounts** — Sign up and sign in with email and password, powered by Better Auth
+- **Secure accounts** — Create an account with a name, unique username, email, and password; sign in with email or username
 - **Bot protection** — Cloudflare Turnstile protects sign-up and sign-in
 - **Device pairing** — Link another device with a short code and an approve tap
 - **Family invitations** — Invite relatives by email or share the existing short code
