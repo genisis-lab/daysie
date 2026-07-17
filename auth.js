@@ -1,5 +1,7 @@
 import { betterAuth } from "better-auth";
 import { bearer, username } from "better-auth/plugins";
+import { passkey } from "@better-auth/passkey";
+import { sendEmail as sendInfraEmail } from "@better-auth/infra";
 import { withCloudflare } from "better-auth-cloudflare";
 
 const cleanOrigin = (value) => {
@@ -24,8 +26,21 @@ const escapeHtml = (value) =>
   );
 
 export async function sendDaysieEmail(env, message) {
+  if (env.BETTER_AUTH_API_KEY && message.template) {
+    const result = await sendInfraEmail(
+      {
+        template: message.template,
+        to: message.to,
+        variables: message.variables,
+        ...(message.subject ? { subject: message.subject } : {}),
+      },
+      { apiKey: env.BETTER_AUTH_API_KEY },
+    );
+    if (!result.success) throw new Error(result.error || "Email delivery failed.");
+    return;
+  }
   if (!env.RESEND_API_KEY || !env.EMAIL_FROM) {
-    throw new Error("Email is not configured. Set RESEND_API_KEY and EMAIL_FROM.");
+    throw new Error("Email is not configured.");
   }
 
   const response = await fetch("https://api.resend.com/emails", {
@@ -79,6 +94,14 @@ export function createDaysieAuth(env, request, executionContext) {
             const resetUrl = `${resetOrigin}/?resetToken=${encodeURIComponent(token)}`;
             const emailPromise = sendDaysieEmail(env, {
               to: user.email,
+              template: "reset-password",
+              variables: {
+                resetLink: resetUrl,
+                userEmail: user.email,
+                userName: user.name || "there",
+                appName: "Daysie",
+                expirationMinutes: "60",
+              },
               subject: "Reset your Daysie password",
               html: `
                 <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#332b24;line-height:1.6">
@@ -101,6 +124,11 @@ export function createDaysieAuth(env, request, executionContext) {
         },
         plugins: [
           bearer(),
+          passkey({
+            rpID: new URL(appOrigin || "https://daysie.pages.dev").hostname,
+            rpName: "Daysie",
+            origin: appOrigin || "https://daysie.pages.dev",
+          }),
           username({
             minUsernameLength: 3,
             maxUsernameLength: 30,
@@ -108,12 +136,37 @@ export function createDaysieAuth(env, request, executionContext) {
         ],
       },
     ),
+    advanced: {
+      defaultCookieAttributes: {
+        secure: true,
+        sameSite: "none",
+        partitioned: true,
+      },
+      cookies: {
+        "better-auth-passkey": {
+          attributes: {
+            secure: true,
+            sameSite: "none",
+            partitioned: true,
+          },
+        },
+      },
+    },
   });
 }
 
-export function familyInviteEmail({ appUrl, code, inviterName }) {
+export function familyInviteEmail({ appUrl, code, inviterName, inviteeEmail }) {
   const inviteUrl = `${appUrl}/?familyInvite=${encodeURIComponent(code)}`;
   return {
+    template: "application-invite",
+    variables: {
+      inviteLink: inviteUrl,
+      inviterName: inviterName || "A family member",
+      inviterEmail: "family@daysie.app",
+      inviteeEmail: inviteeEmail || "family member",
+      appName: "Daysie",
+      expirationDays: "1",
+    },
     subject: `${inviterName || "Someone"} invited you to their Daysie family`,
     html: `
       <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#332b24;line-height:1.6">

@@ -64,7 +64,7 @@ Daysie is a beautiful, accessible reminder and journal app designed for **people
 - **Family invitations** — Invite relatives by email or share the existing short code
 - **Cloud sync** — Your data syncs across all your devices (powered by Cloudflare D1)
 - **Real push notifications** — Get reminders even when the app is closed (when deployed with Cloudflare Worker)
-- **Privacy-first** — Your data is encrypted and scoped to your account only
+- **Privacy-first** — Synced data is access-controlled and scoped to your account; optional backup history is encrypted on your device before upload
 - **Works offline** — Local-first design means the app works without an account or internet
 
 ## 🚀 Quick Start

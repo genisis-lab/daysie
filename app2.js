@@ -498,6 +498,28 @@ function openListDialog() {
         syncSharedLists("created the “" + t + "” shared list"),
         toast("📝 List created", newListEmoji + " " + t));
     }));
+const listTemplates = {
+  groceries: { name: "Groceries", emoji: "🛒", items: ["Milk", "Eggs", "Bread", "Fruit", "Vegetables", "Rice or pasta", "Household supplies"] },
+  packing: { name: "Family packing", emoji: "🧳", items: ["Clothes", "Toiletries", "Chargers", "Medicine", "Snacks", "Travel documents"] },
+};
+$$('[data-list-template]').forEach((button) => button.addEventListener('click', () => {
+  const template = listTemplates[button.dataset.listTemplate];
+  if (!template) return;
+  db.lists || (db.lists = []);
+  db.lists.push({ id: id(), name: template.name, emoji: template.emoji, items: template.items.map((text) => ({ id: id(), text, done: false })), updatedAt: Date.now() });
+  save(); renderListManageList(); renderLists(); syncSharedLists(`created the “${template.name}” template`); toast("Template added", `${template.emoji} ${template.name}`);
+}));
+const routineTemplates = {
+  morning: ["Drink water", "Take morning medicine", "Check today's plan"],
+  weekly: ["Plan family meals", "Check groceries", "Tidy shared spaces"],
+};
+$$('[data-routine-template]').forEach((button) => button.addEventListener('click', () => {
+  const routine = routineTemplates[button.dataset.routineTemplate];
+  const profile = getProfile();
+  const now = Date.now();
+  routine.forEach((title, index) => profile.tasks.push({ id: id(), title, note: "Added from a Daysie routine template", due: now + (index + 1) * 60 * 1000, date: day(), time: "", repeat: button.dataset.routineTemplate === "morning" ? "daily" : "weekly", priority: "low", category: "home", subtasks: [], done: false, notified: false, created: now }));
+  save(); renderAll(); $("#listDialog").close(); toast("Routine added", `${routine.length} repeating reminders are ready.`);
+}));
 const tourSlides = [
   {
     icon: "🌼",

@@ -99,6 +99,9 @@ let db = {
     authEmail: null,
     authUsername: null,
     pushSubscription: null,
+    syncRevision: 0,
+    syncPending: false,
+    syncState: "idle",
   },
   activeProfileId = "default",
   selectedMood = null,
@@ -118,7 +121,7 @@ let db = {
   taskFilter = "all",
   renagTimer = null,
   assignee = null;
-const APP_VERSION = "2026.07.14-23";
+const APP_VERSION = "2026.07.17-24";
 let swRegistration = null,
   updateBannerShown = !1;
 const save = () => {
@@ -131,7 +134,7 @@ const save = () => {
           "Turn on sync in Settings, or remove some photos to free up space.",
         ));
     }
-    settings.authToken && syncToCloud();
+    settings.authToken && scheduleCloudSync();
   },
   saveSettings = () =>
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)),
@@ -223,7 +226,13 @@ const getProfile = () =>
   },
   profileById = (e) => db.profiles.find((t) => t.id === e) || null,
   id = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
-  day = (e) => (e || new Date()).toISOString().slice(0, 10),
+  day = (value) => {
+    const date = value || new Date();
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const dateOfMonth = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${dateOfMonth}`;
+  },
   isIOS = () =>
     /iphone|ipad|ipod/i.test(navigator.userAgent) ||
     ("MacIntel" === navigator.platform && navigator.maxTouchPoints > 1),
@@ -1540,7 +1549,14 @@ function stopStatusPolling() {
 function updateSyncStatus() {
   settings.authToken
     ? ($("#syncStatus").classList.remove("hidden"),
-      ($("#syncStatus").textContent = "☁️ Synced"))
+      ($("#syncStatus").textContent =
+        !navigator.onLine || settings.syncPending
+          ? "☁️ Changes waiting"
+          : settings.syncState === "syncing"
+            ? "☁️ Syncing…"
+            : settings.syncState === "conflict"
+              ? "⚠️ Choose sync version"
+              : "☁️ Synced"))
     : $("#syncStatus").classList.add("hidden");
 }
 function updateAccountUI() {
@@ -1687,10 +1703,33 @@ async function uploadPhotosToR2(e) {
     else t.push(o);
   return t;
 }
-async function syncToCloud() {
-  if (settings.authToken)
-    try {
-      await fetch("https://daysie-api.neil27.workers.dev/data", {
+let cloudSyncTimer = null,
+  cloudSyncActive = false,
+  cloudSyncAgain = false;
+function scheduleCloudSync() {
+  settings.syncPending = true;
+  updateSyncStatus();
+  saveSettings();
+  clearTimeout(cloudSyncTimer);
+  cloudSyncTimer = setTimeout(() => syncToCloud(), 650);
+}
+async function syncToCloud(force = false) {
+  if (!settings.authToken) return;
+  if (!navigator.onLine) {
+    settings.syncPending = true;
+    settings.syncState = "offline";
+    saveSettings();
+    return updateSyncStatus();
+  }
+  if (cloudSyncActive) {
+    cloudSyncAgain = true;
+    return;
+  }
+  cloudSyncActive = true;
+  settings.syncState = "syncing";
+  updateSyncStatus();
+  try {
+      const response = await fetch("https://daysie-api.neil27.workers.dev/data", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1700,11 +1739,63 @@ async function syncToCloud() {
           profiles: stripPhotosForSync(db.profiles),
           lists: db.lists || [],
           tourDone: !!db.tourDone,
+          _baseRevision: Number(settings.syncRevision || 0),
+          _force: force,
         }),
       });
-    } catch (e) {
-      console.error("Sync error:", e);
+      const result = await response.json().catch(() => ({}));
+      if (response.status === 409 && result.conflict) {
+        settings.syncState = "conflict";
+        settings.syncPending = true;
+        saveSettings();
+        updateSyncStatus();
+        const keepDevice = confirm("Daysie found newer changes from another device. Choose OK to keep this device's version, or Cancel to use the cloud version.");
+        if (keepDevice) {
+          settings.syncRevision = result.revision;
+          saveSettings();
+          setTimeout(() => syncToCloud(true), 0);
+          return;
+        }
+        applyCloudPayload({ ...result.cloud, _sync: { revision: result.revision, updatedAt: result.updatedAt } });
+        return;
+      }
+      if (!response.ok) throw new Error(result.error || "Sync failed");
+      settings.syncRevision = Number(result.revision || settings.syncRevision || 0);
+      settings.syncPending = false;
+      settings.syncState = "idle";
+      saveSettings();
+    } catch (error) {
+      settings.syncPending = true;
+      settings.syncState = "offline";
+      saveSettings();
+      console.error("Sync error:", error);
+    } finally {
+      cloudSyncActive = false;
+      updateSyncStatus();
+      if (cloudSyncAgain) {
+        cloudSyncAgain = false;
+        scheduleCloudSync();
+      }
     }
+}
+function applyCloudPayload(payload) {
+  if (!payload) return;
+  if (!payload.lists || (window.family && window.family.familyId)) {
+    // Family lists are synced by the family endpoint.
+  } else db.lists = payload.lists;
+  if (typeof payload.tourDone === "boolean") db.tourDone = db.tourDone || payload.tourDone;
+  if (payload.profiles?.length) {
+    db.profiles = mergeLocalPhotos(payload.profiles);
+    db.profiles.forEach((profile) => { if (!Array.isArray(profile.habits)) profile.habits = []; });
+    collapseProfiles();
+  }
+  settings.syncRevision = Number(payload._sync?.revision || 0);
+  settings.syncPending = false;
+  settings.syncState = "idle";
+  localStorage.setItem(KEY, JSON.stringify(db));
+  saveSettings();
+  renderAll();
+  updateSyncStatus();
 }
 async function pullFromCloud() {
   if (settings.authToken)
@@ -1714,26 +1805,15 @@ async function pullFromCloud() {
       });
       if (e.ok) {
         const t = await e.json();
-        (!t.lists ||
-          (window.family && window.family.familyId) ||
-          (db.lists = t.lists),
-          "boolean" == typeof t.tourDone &&
-            (db.tourDone = db.tourDone || t.tourDone),
-          t.profiles && t.profiles.length > 0
-            ? ((db.profiles = mergeLocalPhotos(t.profiles)),
-              (db.profiles || []).forEach((e) => {
-                Array.isArray(e.habits) || (e.habits = []);
-              }),
-              collapseProfiles(),
-              save(),
-              renderAll())
-            : t.lists && (save(), renderAll()));
+        applyCloudPayload(t);
       }
     } catch (e) {
       console.error("Pull error:", e);
     }
 }
-(($("#enableSyncBtn").onclick = async () => {
+window.addEventListener("online", () => settings.authToken && settings.syncPending && syncToCloud());
+window.addEventListener("offline", () => { if (settings.authToken) { settings.syncState = "offline"; updateSyncStatus(); } });
+($("#enableSyncBtn") && ($("#enableSyncBtn").onclick = async () => {
   toast("☁️ Turning on sync...", "");
   (await ensureAccount())
     ? (updateAccountUI(),

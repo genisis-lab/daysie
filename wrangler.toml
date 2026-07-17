@@ -10,6 +10,10 @@ binding = "DB"
 database_name = "daysie-db"
 database_id = "df029eb9-5b08-4391-b81d-f6702df1626e"
 
+[[r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "daysie-photos"
+
 [vars]
 APP_URL = "https://daysie.pages.dev"
 TURNSTILE_VERIFY_URL = "https://turnstile-siteverify-daysie.neil27.workers.dev/"
@@ -33,6 +37,7 @@ head_sampling_rate = 1
 # VAPID_PUBLIC_KEY - Generate with: npx web-push generate-vapid-keys
 # VAPID_PRIVATE_KEY
 # BETTER_AUTH_SECRET - Generate with: openssl rand -base64 32
-# RESEND_API_KEY - Used for password resets and family invitations
+# BETTER_AUTH_API_KEY - Preferred transactional email provider
+# RESEND_API_KEY - Optional fallback for password resets and family invitations
 # EMAIL_FROM - A verified sender, e.g. "Daysie <hello@yourdomain.com>"
 # APP_URL - Public frontend origin, e.g. "https://daysie.pages.dev"

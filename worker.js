@@ -8,8 +8,13 @@ let e = !1;
 export default {
   async fetch(e, E, executionContext) {
     const p = new URL(e.url).pathname,
+      requestOrigin = e.headers.get("Origin"),
+      allowedOrigins = new Set([String(E.APP_URL || "").replace(/\/$/, ""), "http://localhost:4173", "http://localhost:8787", "http://localhost:3000"]),
+      corsOrigin = requestOrigin && allowedOrigins.has(requestOrigin) ? requestOrigin : String(E.APP_URL || "https://daysie.pages.dev").replace(/\/$/, ""),
       m = {
-        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Origin": corsOrigin,
+        "Access-Control-Allow-Credentials": "true",
+        Vary: "Origin",
         "Access-Control-Allow-Methods": "GET, POST, DELETE, PUT, OPTIONS",
         "Access-Control-Allow-Headers":
           "Content-Type, Authorization, X-Daysie-Legacy-Token",
@@ -66,6 +71,11 @@ export default {
             ok: r,
             service: "daysie-api",
             storage: { d1: r, photos: !!E.PHOTOS },
+            services: {
+              email: !!(E.BETTER_AUTH_API_KEY || (E.RESEND_API_KEY && E.EMAIL_FROM)),
+              push: !!(E.VAPID_PUBLIC_KEY && E.VAPID_PRIVATE_KEY),
+              passkeys: true,
+            },
             time: new Date().toISOString(),
           },
           r ? 200 : 503,
@@ -269,25 +279,209 @@ export default {
         const i = await r(e, E);
         if (!i) return c({ error: "Unauthorized" }, 401, m);
         const t = await E.DB.prepare(
-          "SELECT data FROM user_data WHERE user_id = ?",
+          "SELECT data, revision, updated_at FROM user_data WHERE user_id = ?",
         )
           .bind(i)
           .first();
-        return c(t ? JSON.parse(t.data) : { profiles: [] }, 200, m);
+        const payload = t ? JSON.parse(t.data) : { profiles: [] };
+        payload._sync = {
+          revision: Number(t?.revision || 0),
+          updatedAt: Number(t?.updated_at || 0),
+        };
+        return c(payload, 200, m);
       }
       if ("/data" === p && "POST" === e.method) {
         const i = await r(e, E);
         if (!i) return c({ error: "Unauthorized" }, 401, m);
-        const t = await e.json(),
-          a = JSON.stringify(t);
-        return a.length > 1e6
-          ? c({ error: "Data too large to sync" }, 413, m)
-          : (await E.DB.prepare(
-              "INSERT OR REPLACE INTO user_data (user_id, data, updated_at) VALUES (?, ?, ?)",
-            )
-              .bind(i, a, Date.now())
-              .run(),
-            c({ success: !0 }, 200, m));
+        const t = await e.json();
+        const baseRevision = Number(t._baseRevision || 0);
+        const force = t._force === true;
+        delete t._baseRevision;
+        delete t._force;
+        delete t._sync;
+        const a = JSON.stringify(t);
+        if (a.length > 1e6) return c({ error: "Data too large to sync" }, 413, m);
+        const current = await E.DB.prepare(
+          "SELECT data, revision, updated_at FROM user_data WHERE user_id = ?",
+        ).bind(i).first();
+        if (!current) {
+          await E.DB.prepare(
+            "INSERT INTO user_data (user_id, data, updated_at, revision) VALUES (?, ?, ?, 1)",
+          ).bind(i, a, Date.now()).run();
+          return c({ success: true, revision: 1 }, 200, m);
+        }
+        if (!force && Number(current.revision || 0) !== baseRevision)
+          return c({
+            error: "Sync conflict",
+            conflict: true,
+            revision: Number(current.revision || 0),
+            updatedAt: current.updated_at,
+            cloud: JSON.parse(current.data),
+          }, 409, m);
+        const nextRevision = Number(current.revision || 0) + 1;
+        await E.DB.prepare(
+          "UPDATE user_data SET data = ?, updated_at = ?, revision = ? WHERE user_id = ?",
+        ).bind(a, Date.now(), nextRevision, i).run();
+        return c({ success: true, revision: nextRevision }, 200, m);
+      }
+      if ("/account/sessions" === p && "GET" === e.method) {
+        const userId = await r(e, E);
+        if (!userId) return c({ error: "Unauthorized" }, 401, m);
+        const bearerToken = (e.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+        const rows = await E.DB.prepare(
+          `SELECT s.id, s.token, s.createdAt, s.updatedAt, s.expiresAt, s.ipAddress, s.userAgent,
+                  d.name AS deviceName
+             FROM "session" s LEFT JOIN device_labels d ON d.session_id = s.id
+            WHERE s.userId = ? ORDER BY s.updatedAt DESC`,
+        ).bind(userId).all();
+        return c({ sessions: (rows.results || []).map((session) => ({
+          id: session.id,
+          current: session.token === bearerToken,
+          name: session.deviceName || friendlyDeviceName(session.userAgent),
+          userAgent: session.userAgent || "Unknown browser",
+          ipAddress: session.ipAddress || null,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+          expiresAt: session.expiresAt,
+        })) }, 200, m);
+      }
+      if ("/account/sessions/name" === p && "POST" === e.method) {
+        const userId = await r(e, E);
+        if (!userId) return c({ error: "Unauthorized" }, 401, m);
+        const body = await e.json();
+        const sessionId = String(body.sessionId || "");
+        const name = d(body.name, 48);
+        if (!sessionId || !name) return c({ error: "Device and name are required" }, 400, m);
+        const owned = await E.DB.prepare(`SELECT id FROM "session" WHERE id = ? AND userId = ?`).bind(sessionId, userId).first();
+        if (!owned) return c({ error: "Session not found" }, 404, m);
+        await E.DB.prepare("INSERT OR REPLACE INTO device_labels (session_id, user_id, name, created_at) VALUES (?, ?, ?, ?)").bind(sessionId, userId, name, Date.now()).run();
+        return c({ success: true }, 200, m);
+      }
+      if (p.startsWith("/account/sessions/") && "DELETE" === e.method) {
+        const userId = await r(e, E);
+        if (!userId) return c({ error: "Unauthorized" }, 401, m);
+        const sessionId = decodeURIComponent(p.slice("/account/sessions/".length));
+        const bearerToken = (e.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+        const session = await E.DB.prepare(`SELECT id, token FROM "session" WHERE id = ? AND userId = ?`).bind(sessionId, userId).first();
+        if (!session) return c({ error: "Session not found" }, 404, m);
+        if (session.token === bearerToken) return c({ error: "Use Log out to end this device's session" }, 400, m);
+        await E.DB.batch([
+          E.DB.prepare("DELETE FROM device_labels WHERE session_id = ?").bind(sessionId),
+          E.DB.prepare(`DELETE FROM "session" WHERE id = ? AND userId = ?`).bind(sessionId, userId),
+        ]);
+        return c({ success: true }, 200, m);
+      }
+      if ("/account/recovery-codes" === p && "GET" === e.method) {
+        const userId = await r(e, E);
+        if (!userId) return c({ error: "Unauthorized" }, 401, m);
+        const row = await E.DB.prepare("SELECT COUNT(*) AS count, MAX(created_at) AS createdAt FROM recovery_codes WHERE user_id = ? AND used_at IS NULL").bind(userId).first();
+        return c({ remaining: Number(row?.count || 0), createdAt: row?.createdAt || null }, 200, m);
+      }
+      if ("/account/recovery-codes" === p && "POST" === e.method) {
+        const userId = await r(e, E);
+        if (!userId) return c({ error: "Unauthorized" }, 401, m);
+        const codes = Array.from({ length: 8 }, () => recoveryCode());
+        await E.DB.prepare("DELETE FROM recovery_codes WHERE user_id = ?").bind(userId).run();
+        await E.DB.batch(await Promise.all(codes.map(async (code) => E.DB.prepare("INSERT INTO recovery_codes (id, user_id, code_hash, used_at, created_at) VALUES (?, ?, ?, NULL, ?)").bind(crypto.randomUUID(), userId, await sha256(code), Date.now()))));
+        return c({ codes }, 200, m);
+      }
+      if ("/account/recover" === p && "POST" === e.method) {
+        const ip = e.headers.get("CF-Connecting-IP") || "unknown";
+        if (!(await u(E, `recover:${ip}`, 8, 15 * 60 * 1000))) return c({ error: "Too many attempts. Try again later." }, 429, m);
+        const body = await e.json();
+        const email = String(body.email || "").trim().toLowerCase();
+        const codeHash = await sha256(String(body.code || "").trim().toUpperCase());
+        const user = await E.DB.prepare(`SELECT id, email, name, username FROM "user" WHERE lower(email) = ?`).bind(email).first();
+        if (!user) return c({ error: "Invalid email or recovery code" }, 400, m);
+        const code = await E.DB.prepare("SELECT id FROM recovery_codes WHERE user_id = ? AND code_hash = ? AND used_at IS NULL").bind(user.id, codeHash).first();
+        if (!code) return c({ error: "Invalid email or recovery code" }, 400, m);
+        const used = await E.DB.prepare("UPDATE recovery_codes SET used_at = ? WHERE id = ? AND used_at IS NULL").bind(Date.now(), code.id).run();
+        if (!g(used)) return c({ error: "That recovery code was already used" }, 409, m);
+        const token = crypto.randomUUID() + crypto.randomUUID().replaceAll("-", "");
+        const sessionId = crypto.randomUUID();
+        const now = Date.now();
+        await E.DB.prepare(`INSERT INTO "session" (id, expiresAt, token, createdAt, updatedAt, ipAddress, userAgent, userId) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).bind(sessionId, now + 30 * 24 * 60 * 60 * 1000, token, now, now, ip, e.headers.get("User-Agent"), user.id).run();
+        return c({ token, user: { id: user.id, email: user.email, name: user.name, username: user.username } }, 200, m);
+      }
+      if ("/notification-preferences" === p && "GET" === e.method) {
+        const userId = await r(e, E);
+        if (!userId) return c({ error: "Unauthorized" }, 401, m);
+        const row = await E.DB.prepare("SELECT quiet_start, quiet_end, timezone, categories, updated_at FROM notification_preferences WHERE user_id = ?").bind(userId).first();
+        return c(row ? { quietStart: row.quiet_start, quietEnd: row.quiet_end, timezone: row.timezone, categories: JSON.parse(row.categories), updatedAt: row.updated_at } : { quietStart: "22:00", quietEnd: "07:00", timezone: "UTC", categories: { reminders: true, family: true, lists: true } }, 200, m);
+      }
+      if ("/notification-preferences" === p && "PUT" === e.method) {
+        const userId = await r(e, E);
+        if (!userId) return c({ error: "Unauthorized" }, 401, m);
+        const body = await e.json();
+        const timezone = validTimezone(body.timezone) ? body.timezone : "UTC";
+        const timePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+        const quietStart = timePattern.test(body.quietStart || "") ? body.quietStart : null;
+        const quietEnd = timePattern.test(body.quietEnd || "") ? body.quietEnd : null;
+        const categories = { reminders: body.categories?.reminders !== false, family: body.categories?.family !== false, lists: body.categories?.lists !== false };
+        await E.DB.prepare("INSERT OR REPLACE INTO notification_preferences (user_id, quiet_start, quiet_end, timezone, categories, updated_at) VALUES (?, ?, ?, ?, ?, ?)").bind(userId, quietStart, quietEnd, timezone, JSON.stringify(categories), Date.now()).run();
+        return c({ success: true }, 200, m);
+      }
+      if ("/backups" === p && "GET" === e.method) {
+        const userId = await r(e, E);
+        if (!userId) return c({ error: "Unauthorized" }, 401, m);
+        const rows = await E.DB.prepare("SELECT id, size, created_at FROM encrypted_backups WHERE user_id = ? ORDER BY created_at DESC LIMIT 10").bind(userId).all();
+        return c({ backups: (rows.results || []).map((row) => ({ id: row.id, size: row.size, createdAt: row.created_at })) }, 200, m);
+      }
+      if ("/backups" === p && "POST" === e.method) {
+        const userId = await r(e, E);
+        if (!userId) return c({ error: "Unauthorized" }, 401, m);
+        const body = await e.json();
+        const envelope = JSON.stringify(body.envelope || {});
+        if (envelope.length > 1200000) return c({ error: "Backup is too large" }, 413, m);
+        const id = crypto.randomUUID();
+        await E.DB.prepare("INSERT INTO encrypted_backups (id, user_id, envelope, size, created_at) VALUES (?, ?, ?, ?, ?)").bind(id, userId, envelope, envelope.length, Date.now()).run();
+        await E.DB.prepare("DELETE FROM encrypted_backups WHERE user_id = ? AND id NOT IN (SELECT id FROM encrypted_backups WHERE user_id = ? ORDER BY created_at DESC LIMIT 10)").bind(userId, userId).run();
+        return c({ id, success: true }, 200, m);
+      }
+      if (p.startsWith("/backups/") && "GET" === e.method) {
+        const userId = await r(e, E);
+        if (!userId) return c({ error: "Unauthorized" }, 401, m);
+        const id = decodeURIComponent(p.slice(9));
+        const row = await E.DB.prepare("SELECT id, envelope, created_at FROM encrypted_backups WHERE id = ? AND user_id = ?").bind(id, userId).first();
+        return row ? c({ id: row.id, envelope: JSON.parse(row.envelope), createdAt: row.created_at }, 200, m) : c({ error: "Backup not found" }, 404, m);
+      }
+      if (p.startsWith("/backups/") && "DELETE" === e.method) {
+        const userId = await r(e, E);
+        if (!userId) return c({ error: "Unauthorized" }, 401, m);
+        await E.DB.prepare("DELETE FROM encrypted_backups WHERE id = ? AND user_id = ?").bind(decodeURIComponent(p.slice(9)), userId).run();
+        return c({ success: true }, 200, m);
+      }
+      if ("/account/delete" === p && "POST" === e.method) {
+        const userId = await r(e, E);
+        if (!userId) return c({ error: "Unauthorized" }, 401, m);
+        const body = await e.json();
+        try {
+          const verified = await createDaysieAuth(E, e).api.verifyPassword({ body: { password: String(body.password || "") }, headers: e.headers });
+          if (!verified?.status) return c({ error: "Password is incorrect" }, 403, m);
+        } catch { return c({ error: "Password is incorrect" }, 403, m); }
+        if (E.PHOTOS) {
+          const photos = await E.DB.prepare("SELECT key FROM photo_access WHERE user_id = ?").bind(userId).all();
+          for (const photo of photos.results || []) await E.PHOTOS.delete(photo.key);
+        }
+        const family = await E.DB.prepare("SELECT family_id FROM family_members WHERE user_id = ?").bind(userId).first();
+        await E.DB.batch([
+          E.DB.prepare("DELETE FROM user_data WHERE user_id = ?").bind(userId),
+          E.DB.prepare("DELETE FROM push_subscriptions WHERE user_id = ?").bind(userId),
+          E.DB.prepare("DELETE FROM photo_access WHERE user_id = ?").bind(userId),
+          E.DB.prepare("DELETE FROM recovery_codes WHERE user_id = ?").bind(userId),
+          E.DB.prepare("DELETE FROM notification_preferences WHERE user_id = ?").bind(userId),
+          E.DB.prepare("DELETE FROM encrypted_backups WHERE user_id = ?").bind(userId),
+          E.DB.prepare("DELETE FROM device_labels WHERE user_id = ?").bind(userId),
+          E.DB.prepare("DELETE FROM family_invites WHERE inviter_user_id = ?").bind(userId),
+          E.DB.prepare("DELETE FROM assigned_items WHERE from_user = ? OR to_user = ?").bind(userId, userId),
+          E.DB.prepare("DELETE FROM family_members WHERE user_id = ?").bind(userId),
+          E.DB.prepare("DELETE FROM pair_codes WHERE user_id = ?").bind(userId),
+          E.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId),
+          E.DB.prepare(`DELETE FROM "user" WHERE id = ?`).bind(userId),
+          E.DB.prepare("DELETE FROM users WHERE id = ?").bind(userId),
+        ]);
+        if (family) await E.DB.prepare("INSERT INTO family_activity (id, family_id, user_id, action, details, created_at) VALUES (?, ?, ?, 'account-left', NULL, ?)").bind(crypto.randomUUID(), family.family_id, userId, Date.now()).run();
+        return c({ success: true }, 200, m);
       }
       if ("/push/subscribe" === p && "POST" === e.method) {
         const i = await r(e, E);
@@ -465,6 +659,46 @@ export default {
           c({ success: !0, familyId: o }, 200, m)
         );
       }
+      if ("/family/invites" === p && "GET" === e.method) {
+        const userId = await r(e, E);
+        if (!userId) return c({ error: "Unauthorized" }, 401, m);
+        await E.DB.prepare("DELETE FROM family_invites WHERE expires < ?").bind(Date.now()).run();
+        const rows = await E.DB.prepare("SELECT code, invited_email, created, expires FROM family_invites WHERE inviter_user_id = ? ORDER BY created DESC").bind(userId).all();
+        return c({ invites: (rows.results || []).map((row) => ({ code: row.code, email: row.invited_email, createdAt: row.created, expiresAt: row.expires })) }, 200, m);
+      }
+      if ("/family/invites/resend" === p && "POST" === e.method) {
+        const userId = await r(e, E);
+        if (!userId) return c({ error: "Unauthorized" }, 401, m);
+        if (!(await u(E, `finvite:${userId}`, 8, 36e5))) return c({ error: "Too many invitations. Please wait before trying again." }, 429, m);
+        const body = await e.json();
+        const code = String(body.code || "").trim().toUpperCase();
+        const invite = await E.DB.prepare("SELECT i.*, m.name FROM family_invites i LEFT JOIN family_members m ON m.user_id = i.inviter_user_id WHERE i.code = ? AND i.inviter_user_id = ?").bind(code, userId).first();
+        if (!invite) return c({ error: "Invite not found" }, 404, m);
+        if (!invite.invited_email) return c({ error: "This code-only invite has no email address" }, 400, m);
+        const expires = Date.now() + 15 * 60 * 1000;
+        await sendDaysieEmail(E, { to: invite.invited_email, ...familyInviteEmail({ appUrl: String(E.APP_URL || "https://daysie.pages.dev").replace(/\/$/, ""), code, inviterName: invite.name || "A family member", inviteeEmail: invite.invited_email }) });
+        await E.DB.prepare("UPDATE family_invites SET expires = ? WHERE code = ?").bind(expires, code).run();
+        await logFamilyActivity(E, invite.family_id, userId, "invite-resent", { email: invite.invited_email });
+        return c({ success: true, expires }, 200, m);
+      }
+      if (p.startsWith("/family/invites/") && "DELETE" === e.method) {
+        const userId = await r(e, E);
+        if (!userId) return c({ error: "Unauthorized" }, 401, m);
+        const code = decodeURIComponent(p.slice("/family/invites/".length)).toUpperCase();
+        const invite = await E.DB.prepare("SELECT family_id, invited_email FROM family_invites WHERE code = ? AND inviter_user_id = ?").bind(code, userId).first();
+        if (!invite) return c({ error: "Invite not found" }, 404, m);
+        await E.DB.prepare("DELETE FROM family_invites WHERE code = ? AND inviter_user_id = ?").bind(code, userId).run();
+        await logFamilyActivity(E, invite.family_id, userId, "invite-revoked", { email: invite.invited_email });
+        return c({ success: true }, 200, m);
+      }
+      if ("/family/activity" === p && "GET" === e.method) {
+        const userId = await r(e, E);
+        if (!userId) return c({ error: "Unauthorized" }, 401, m);
+        const member = await E.DB.prepare("SELECT family_id FROM family_members WHERE user_id = ?").bind(userId).first();
+        if (!member) return c({ activity: [] }, 200, m);
+        const rows = await E.DB.prepare("SELECT a.id, a.user_id, a.action, a.details, a.created_at, m.name, m.emoji FROM family_activity a LEFT JOIN family_members m ON m.user_id = a.user_id WHERE a.family_id = ? ORDER BY a.created_at DESC LIMIT 50").bind(member.family_id).all();
+        return c({ activity: (rows.results || []).map((row) => ({ id: row.id, userId: row.user_id, name: row.name || "Family member", emoji: row.emoji || "🌼", action: row.action, details: row.details ? JSON.parse(row.details) : null, createdAt: row.created_at })) }, 200, m);
+      }
       if ("/family/invite" === p && "POST" === e.method) {
         const i = await r(e, E);
         if (!i) return c({ error: "Unauthorized" }, 401, m);
@@ -516,6 +750,7 @@ export default {
                   new URL(e.url).origin,
                 code: s,
                 inviterName: d(a.name, 40) || "A family member",
+                inviteeEmail: inviteEmail,
               }),
             });
             emailSent = !0;
@@ -523,6 +758,7 @@ export default {
             console.error("Family invitation email failed", error);
             emailError = "Email delivery is unavailable. Share the invite code instead.";
           }
+        await logFamilyActivity(E, n, i, "invite-created", { email: inviteEmail || null });
         return c(
           {
             code: s,
@@ -573,6 +809,8 @@ export default {
             Date.now(),
           )
           .run();
+        await E.DB.prepare("DELETE FROM family_invites WHERE code = ?").bind(p).run();
+        await logFamilyActivity(E, f.family_id, t, "member-joined", { name: d(n, 40) || "Me" });
         const l = (
           await E.DB.prepare(
             "SELECT user_id, name, emoji, color FROM family_members WHERE family_id = ? ORDER BY joined ASC",
@@ -638,7 +876,8 @@ export default {
             "UPDATE assigned_items SET status = 'done' WHERE (to_user = ? OR from_user = ?) AND status != 'done'",
           )
             .bind(i, i)
-            .run());
+          .run());
+        await logFamilyActivity(E, t.family_id, i, "member-left", { name: t.name || "Someone" });
         const a = await E.DB.prepare(
           "SELECT user_id FROM family_members WHERE family_id = ?",
         )
@@ -994,6 +1233,7 @@ export default {
           const a = t.tasks || [];
           for (const s of a)
             if (!s.done && s.due && s.due <= e && !s.notified) {
+              if (!(await notificationAllowed(r, i, "reminders", e))) continue;
               const e = await r.DB.prepare(
                 "SELECT subscription FROM push_subscriptions WHERE user_id = ?",
               )
@@ -1031,6 +1271,7 @@ export default {
         .bind(e)
         .all();
       for (const e of n.results) {
+        if (!(await notificationAllowed(r, e.to_user, "family", Date.now()))) continue;
         (await r.DB.prepare(
           "SELECT subscription FROM push_subscriptions WHERE user_id = ?",
         )
@@ -1063,7 +1304,11 @@ async function r(e, r) {
     const authSession = await createDaysieAuth(r, e).api.getSession({
       headers: e.headers,
     });
-    return authSession?.user?.id || null;
+    if (!authSession?.user?.id) return null;
+    await r.DB.prepare("INSERT OR IGNORE INTO users (id, email, created_at) VALUES (?, ?, ?)")
+      .bind(authSession.user.id, authSession.user.email || null, Date.now())
+      .run();
+    return authSession.user.id;
   } catch (error) {
     console.error("Better Auth session lookup failed", error);
     return null;
@@ -1087,6 +1332,12 @@ async function i(r) {
     r.DB.prepare(
       "CREATE TABLE IF NOT EXISTS photo_access (key TEXT PRIMARY KEY, user_id TEXT NOT NULL, token TEXT NOT NULL, created_at INTEGER NOT NULL)",
     ),
+    r.DB.prepare('CREATE TABLE IF NOT EXISTS passkey (id TEXT PRIMARY KEY NOT NULL, name TEXT, publicKey TEXT NOT NULL, userId TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE, credentialID TEXT NOT NULL UNIQUE, counter INTEGER NOT NULL, deviceType TEXT NOT NULL, backedUp INTEGER NOT NULL, transports TEXT, createdAt INTEGER, aaguid TEXT)'),
+    r.DB.prepare("CREATE TABLE IF NOT EXISTS device_labels (session_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, created_at INTEGER NOT NULL)"),
+    r.DB.prepare("CREATE TABLE IF NOT EXISTS recovery_codes (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, code_hash TEXT NOT NULL UNIQUE, used_at INTEGER, created_at INTEGER NOT NULL)"),
+    r.DB.prepare("CREATE TABLE IF NOT EXISTS family_activity (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, user_id TEXT NOT NULL, action TEXT NOT NULL, details TEXT, created_at INTEGER NOT NULL)"),
+    r.DB.prepare("CREATE TABLE IF NOT EXISTS notification_preferences (user_id TEXT PRIMARY KEY, quiet_start TEXT, quiet_end TEXT, timezone TEXT NOT NULL DEFAULT 'UTC', categories TEXT NOT NULL DEFAULT '{\"reminders\":true,\"family\":true,\"lists\":true}', updated_at INTEGER NOT NULL)"),
+    r.DB.prepare("CREATE TABLE IF NOT EXISTS encrypted_backups (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, envelope TEXT NOT NULL, size INTEGER NOT NULL, created_at INTEGER NOT NULL)"),
   ]);
   try {
     await r.DB.prepare(
@@ -1108,7 +1359,62 @@ async function i(r) {
       "ALTER TABLE family_invites ADD COLUMN inviter_user_id TEXT",
     ).run();
   } catch (r) {}
+  try {
+    await r.DB.prepare("ALTER TABLE user_data ADD COLUMN revision INTEGER NOT NULL DEFAULT 0").run();
+  } catch (r) {}
   e = !0;
+}
+
+function friendlyDeviceName(userAgent = "") {
+  const ua = String(userAgent);
+  const browser = /Edg\//.test(ua) ? "Edge" : /CriOS|Chrome\//.test(ua) ? "Chrome" : /Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : "Browser";
+  const device = /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android" : /Macintosh/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : "device";
+  return `${browser} on ${device}`;
+}
+
+function recoveryCode() {
+  const alphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const part = () => Array.from(crypto.getRandomValues(new Uint8Array(4)), (value) => alphabet[value % alphabet.length]).join("");
+  return `DAY-${part()}-${part()}`;
+}
+
+async function sha256(value) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(value)));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function validTimezone(value) {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: String(value) }).format();
+    return true;
+  } catch { return false; }
+}
+
+async function logFamilyActivity(env, familyId, userId, action, details = null) {
+  if (!familyId) return;
+  try {
+    await env.DB.prepare("INSERT INTO family_activity (id, family_id, user_id, action, details, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind(crypto.randomUUID(), familyId, userId, action, details ? JSON.stringify(details) : null, Date.now())
+      .run();
+  } catch (error) {
+    console.error("Family activity log failed", error);
+  }
+}
+
+async function notificationAllowed(env, userId, category, timestamp = Date.now()) {
+  const row = await env.DB.prepare("SELECT quiet_start, quiet_end, timezone, categories FROM notification_preferences WHERE user_id = ?").bind(userId).first();
+  if (!row) return true;
+  try {
+    const categories = JSON.parse(row.categories || "{}");
+    if (categories[category] === false) return false;
+  } catch {}
+  if (!row.quiet_start || !row.quiet_end) return true;
+  const timeZone = validTimezone(row.timezone) ? row.timezone : "UTC";
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(timestamp));
+  const current = `${parts.find((part) => part.type === "hour")?.value || "00"}:${parts.find((part) => part.type === "minute")?.value || "00"}`;
+  return row.quiet_start < row.quiet_end
+    ? !(current >= row.quiet_start && current < row.quiet_end)
+    : !(current >= row.quiet_start || current < row.quiet_end);
 }
 async function t(e, r, i, t, a) {
   const n = await e.DB.prepare(

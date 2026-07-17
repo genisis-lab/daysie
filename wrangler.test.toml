@@ -1,0 +1,17 @@
+name = "daysie-api-test"
+main = "worker.js"
+compatibility_date = "2026-06-24"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "daysie-test"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[[r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "daysie-test-photos"
+
+[vars]
+APP_URL = "https://daysie.pages.dev"
+BETTER_AUTH_SECRET = "test-only-secret-that-is-long-enough-123456"

@@ -59,6 +59,7 @@ function showAuthPanel(panel) {
     signUp: $("#signUpForm"),
     reset: $("#passwordResetRequestForm"),
     newPassword: $("#newPasswordForm"),
+    recovery: $("#recoverySignInForm"),
   };
   Object.entries(panels).forEach(([name, element]) =>
     element?.classList.toggle("hidden", name !== panel),
