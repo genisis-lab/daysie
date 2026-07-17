@@ -614,7 +614,18 @@
                 ></div>
               </div>
               <button type="submit" id="signInBtn" class="primary wide">Sign in</button>
+              <button type="button" id="passkeySignInBtn" class="soft wide">🔑 Sign in with a passkey</button>
               <button type="button" id="forgotPasswordBtn" class="text-button">Forgot password?</button>
+              <button type="button" id="showRecoveryBtn" class="text-button">Use a recovery code</button>
+            </form>
+            <form id="recoverySignInForm" class="auth-form hidden">
+              <button type="button" id="backFromRecoveryBtn" class="text-button auth-back">← Back to sign in</button>
+              <h4>Use a recovery code</h4>
+              <label for="recoveryEmail">Email address</label>
+              <input id="recoveryEmail" type="email" autocomplete="email" required />
+              <label for="recoveryCode">One-time recovery code</label>
+              <input id="recoveryCode" autocomplete="one-time-code" required placeholder="DAY-XXXX-XXXX" />
+              <button type="submit" class="primary wide">Recover account</button>
             </form>
             <form id="signUpForm" class="auth-form hidden">
               <label for="signUpName">Your name</label>
@@ -726,6 +737,17 @@
               </form>
               <button type="button" id="sendPasswordResetBtn" class="text-button">Email me a password reset link instead</button>
             </section>
+            <section class="settings-feature-card" aria-labelledby="passkeyTitle">
+              <div class="feature-heading"><span>🔑</span><div><b id="passkeyTitle">Passkeys &amp; recovery</b><small>Use Face ID, Touch ID, or a device PIN. Keep one-time codes somewhere safe.</small></div></div>
+              <button type="button" id="addPasskeyBtn" class="soft wide">Add a passkey</button>
+              <button type="button" id="generateRecoveryCodesBtn" class="soft wide">Generate new recovery codes</button>
+              <div id="recoveryCodesResult" class="feature-result hidden"></div>
+            </section>
+            <section class="settings-feature-card" aria-labelledby="devicesTitle">
+              <div class="feature-heading"><span>📱</span><div><b id="devicesTitle">Signed-in devices</b><small>Rename devices and log out any session individually.</small></div></div>
+              <div id="deviceSessionList" class="feature-list"><small>Loading devices…</small></div>
+              <button type="button" id="refreshDevicesBtn" class="text-button">Refresh devices</button>
+            </section>
             <section class="family-invite-card" aria-labelledby="familyInviteSettingsTitle">
               <div class="invite-card-heading">
                 <span aria-hidden="true">👪</span>
@@ -747,6 +769,31 @@
                 <button type="button" id="copyFamilyInviteCode" class="invite-code-button" aria-label="Copy family invite code"></button>
                 <small id="settingsFamilyInviteExpiry"></small>
               </div>
+              <div id="pendingInviteList" class="feature-list"></div>
+              <details class="feature-details"><summary>Recent family activity</summary><div id="familyActivityList" class="feature-list"></div></details>
+            </section>
+            <section class="settings-feature-card" aria-labelledby="backupTitle">
+              <div class="feature-heading"><span>🛟</span><div><b id="backupTitle">Encrypted backup history</b><small>Backups are encrypted on this device before upload. Your recovery key stays with you.</small></div></div>
+              <button type="button" id="enableBackupsBtn" class="soft wide">Enable encrypted backups</button>
+              <button type="button" id="backupNowBtn" class="soft wide">Back up now</button>
+              <button type="button" id="copyBackupKeyBtn" class="text-button">Copy recovery key</button>
+              <div id="backupList" class="feature-list"></div>
+            </section>
+            <section class="settings-feature-card" aria-labelledby="notificationPrefsTitle">
+              <div class="feature-heading"><span>🔔</span><div><b id="notificationPrefsTitle">Notification preferences</b><small>Choose categories and quiet hours in your timezone.</small></div></div>
+              <div class="category-grid">
+                <label class="check-row"><input id="notifyReminders" type="checkbox" checked /><span>Reminders</span></label>
+                <label class="check-row"><input id="notifyFamily" type="checkbox" checked /><span>Family updates</span></label>
+                <label class="check-row"><input id="notifyLists" type="checkbox" checked /><span>Shared lists</span></label>
+              </div>
+              <div class="time-grid"><label>Quiet from<input id="quietStart" type="time" value="22:00" /></label><label>Quiet until<input id="quietEnd" type="time" value="07:00" /></label></div>
+              <small id="timezoneLabel" class="field-hint"></small>
+              <button type="button" id="saveNotificationPrefsBtn" class="soft wide">Save notification preferences</button>
+            </section>
+            <section class="settings-feature-card" aria-labelledby="pwaHealthTitle">
+              <div class="feature-heading"><span>🩺</span><div><b id="pwaHealthTitle">App health</b><small>Checks cloud services, offline support, notifications, and photo storage.</small></div></div>
+              <div id="pwaHealthList" class="health-grid"></div>
+              <button type="button" id="refreshHealthBtn" class="text-button">Run checks again</button>
             </section>
             <button
               type="button"
@@ -810,6 +857,13 @@
             <button type="button" id="signOutBtn" class="soft wide">
               <span class="inline-icon">↪</span>Log out on this device
             </button>
+            <details class="danger-zone">
+              <summary>Delete account &amp; cloud data</summary>
+              <p>This permanently deletes your synced Daysie data, cloud photos, backups, sessions, and family membership.</p>
+              <label for="deleteAccountPassword">Current password</label>
+              <input id="deleteAccountPassword" type="password" autocomplete="current-password" />
+              <button type="button" id="deleteAccountBtn" class="danger wide">Permanently delete my account</button>
+            </details>
           </div>
         </div>
 
@@ -922,6 +976,14 @@
         </div>
         <div id="listManageList" class="manage-list"></div>
         <hr style="border-color: var(--line); margin: 14px 0" />
+        <p class="label">Quick templates</p>
+        <div class="template-grid">
+          <button type="button" class="soft" data-list-template="groceries">🛒 Grocery staples</button>
+          <button type="button" class="soft" data-list-template="packing">🧳 Family packing</button>
+          <button type="button" class="soft" data-routine-template="morning">☀️ Morning routine</button>
+          <button type="button" class="soft" data-routine-template="weekly">🧹 Weekly reset</button>
+        </div>
+        <hr style="border-color: var(--line); margin: 14px 0" />
         <label
           >New list<input
             id="newListName"
@@ -1010,9 +1072,11 @@
       crossorigin="anonymous"
       defer
     ></script>
+    <script src="auth-client.bundle.js" defer></script>
     <script src="app.js" defer></script>
     <script defer src="app2.js"></script>
     <script defer src="app3.js"></script>
     <script defer src="auth-ui.js"></script>
+    <script defer src="account-features.js"></script>
   </body>
 </html>
