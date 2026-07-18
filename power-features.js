@@ -8,7 +8,7 @@
     );
   const auth = () => ({ Authorization: `Bearer ${settings.authToken}` });
   const featureRequest = async (path, options = {}) => {
-    const response = await fetch(`${API}${path}`, {
+    const response = await daysieAuthenticatedFetch(`${API}${path}`, {
       ...options,
       credentials: "include",
       headers: {
@@ -18,11 +18,11 @@
       },
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || data.message || "Request failed");
+    if (!response.ok) throw new Error(response.status === 401 ? "Your session expired. Sign in again to continue." : data.error || data.message || "Request failed");
     return data;
   };
   const authGet = async (path) => {
-    const response = await fetch(`${API}/api/auth${path}`, {
+    const response = await daysieAuthenticatedFetch(`${API}/api/auth${path}`, {
       credentials: "include",
       headers: auth(),
     });

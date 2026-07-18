@@ -116,6 +116,9 @@ function authHeaders(e) {
   const t = { Authorization: `Bearer ${settings.authToken}` };
   return (e && (t["Content-Type"] = "application/json"), t);
 }
+function familyApiFetch(url, options = {}) {
+  return daysieAuthenticatedFetch(url, options);
+}
 function meProfile() {
   return (
     (db.profiles && db.profiles[0]) || { name: "Me", emoji: "🌼", color: "sun" }
@@ -140,7 +143,7 @@ async function loadFamily() {
     (window.family.members || []).length
   );
   try {
-    const t = await fetch(`${API}/family?ts=${Date.now()}`, {
+    const t = await familyApiFetch(`${API}/family?ts=${Date.now()}`, {
       headers: authHeaders(),
       cache: "no-store",
     });
@@ -170,7 +173,7 @@ async function recoverCachedFamily() {
   if (!e || !e.familyId || !settings.authToken) return null;
   try {
     const t = meProfile(),
-      i = await fetch(`${API}/family/recover`, {
+      i = await familyApiFetch(`${API}/family/recover`, {
         method: "POST",
         headers: authHeaders(!0),
         body: JSON.stringify({
@@ -193,7 +196,7 @@ async function pushMyProfile() {
   if (!settings.authToken) return;
   const e = meProfile();
   try {
-    await fetch(`${API}/family/profile`, {
+    await familyApiFetch(`${API}/family/profile`, {
       method: "POST",
       headers: authHeaders(!0),
       body: JSON.stringify({ name: e.name, emoji: e.emoji, color: e.color }),
@@ -278,33 +281,33 @@ async function assignTaskToMember(e, t) {
     return toast("Could not assign", "Sync is not ready yet. Try again.");
   const i = (window.family.members || []).find((t) => t.userId === e);
   try {
-    if (
-      !(
-        await fetch(`${API}/family/assign`, {
-          method: "POST",
-          headers: authHeaders(!0),
-          body: JSON.stringify({
-            toUser: e,
-            task: {
-              title: t.title,
-              note: t.note,
-              due: t.due,
-              priority: t.priority,
-              category: t.category,
-            },
-          }),
-        })
-      ).ok
-    )
-      throw new Error("assign failed");
+    const response = await familyApiFetch(`${API}/family/assign`, {
+      method: "POST",
+      headers: authHeaders(!0),
+      body: JSON.stringify({
+        toUser: e,
+        task: {
+          title: t.title,
+          note: t.note,
+          due: t.due,
+          priority: t.priority,
+          category: t.category,
+        },
+      }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "assign failed");
     (toast(
       "📋 Sent to " + (i ? i.name : "family"),
-      "It landed in their Daysie.",
+      result.delivery?.sent > 0
+        ? "It landed in their Daysie and the notification was delivered."
+        : "It landed in their Daysie. They will see it when they open the app.",
     ),
       await loadFamilyInbox());
   } catch (e) {
-    (await loadFamily(),
-      toast("Could not assign", "Check your connection and try again."));
+    if (!settings.authToken)
+      return toast("Sign in again", "Your session expired before the task could be assigned.");
+    (await loadFamily(), toast("Could not assign", e.message || "Check your connection and try again."));
   }
 }
 function renderRemindMembers() {
@@ -323,7 +326,7 @@ function renderRemindMembers() {
 async function loadFamilyInbox() {
   if (settings.authToken && !recentlyLeftFamily())
     try {
-      const e = await fetch(`${API}/family/inbox`, { headers: authHeaders() });
+      const e = await familyApiFetch(`${API}/family/inbox`, { headers: authHeaders() });
       if (!e.ok) return;
       const t = await e.json(),
         i = readDoneInboxIds();
@@ -392,7 +395,7 @@ async function ackInbox(e) {
     (window.familyInbox = (window.familyInbox || []).filter((t) => t.id !== e)),
     renderFamilyInbox());
   try {
-    await fetch(`${API}/family/inbox/ack`, {
+    await familyApiFetch(`${API}/family/inbox/ack`, {
       method: "POST",
       headers: authHeaders(!0),
       body: JSON.stringify({ id: e, status: "done" }),
@@ -412,7 +415,7 @@ async function loadFamilyLists() {
     !(familyListsLocalEditAt && Date.now() - familyListsLocalEditAt < 6e3)
   )
     try {
-      const e = await fetch(`${API}/family/lists?ts=${Date.now()}`, {
+      const e = await familyApiFetch(`${API}/family/lists?ts=${Date.now()}`, {
         headers: authHeaders(),
         cache: "no-store",
       });
@@ -429,7 +432,7 @@ async function saveFamilyLists(e) {
       (lastFamilyActivityAt = Date.now()),
       (window.familyLists = db.lists || window.familyLists || []));
     try {
-      const t = await fetch(`${API}/family/lists`, {
+      const t = await familyApiFetch(`${API}/family/lists`, {
         method: "PUT",
         headers: authHeaders(!0),
         body: JSON.stringify({
@@ -480,7 +483,7 @@ async function familyBoot() {
       );
     const e = meProfile();
     try {
-      const t = await fetch(`${API}/family/invite`, {
+      const t = await familyApiFetch(`${API}/family/invite`, {
         method: "POST",
         headers: authHeaders(!0),
         body: JSON.stringify({ name: e.name, emoji: e.emoji, color: e.color }),
@@ -516,7 +519,7 @@ async function familyBoot() {
       );
     const t = meProfile();
     try {
-      const i = await fetch(`${API}/family/join`, {
+      const i = await familyApiFetch(`${API}/family/join`, {
         method: "POST",
         headers: authHeaders(!0),
         body: JSON.stringify({
@@ -557,7 +560,7 @@ async function familyBoot() {
         try {
           if (
             !(
-              await fetch(`${API}/family/leave`, {
+              await familyApiFetch(`${API}/family/leave`, {
                 method: "POST",
                 headers: authHeaders(!0),
                 body: JSON.stringify({ leaveAll: !0 }),
@@ -592,26 +595,28 @@ async function familyBoot() {
     const a = $("#remindWhen").value,
       n = a ? new Date(a).getTime() : Date.now();
     try {
-      if (
-        !(
-          await fetch(`${API}/family/remind`, {
-            method: "POST",
-            headers: authHeaders(!0),
-            body: JSON.stringify({ toUser: t, title: i, fireAt: n }),
-          })
-        ).ok
-      )
-        throw new Error();
+      const response = await familyApiFetch(`${API}/family/remind`, {
+        method: "POST",
+        headers: authHeaders(!0),
+        body: JSON.stringify({ toUser: t, title: i, fireAt: n }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "Could not send reminder");
       (($("#remindText").value = ""),
         ($("#remindWhen").value = ""),
         toast(
           "🔔 Reminder sent",
           n > Date.now() + 6e4
             ? "It will arrive at the chosen time."
-            : "Delivered now.",
+            : result.delivery?.sent > 0
+              ? "The notification was delivered."
+              : "It is in their Daysie and will retry notification delivery.",
         ));
     } catch (e) {
-      toast("Could not send reminder", "Try again.");
+      toast(
+        settings.authToken ? "Could not send reminder" : "Sign in again",
+        settings.authToken ? e.message || "Try again." : "Your session expired before the reminder could be sent.",
+      );
     }
   }),
   setTimeout(familyBoot, 900));
