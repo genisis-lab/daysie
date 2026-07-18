@@ -126,7 +126,7 @@ let db = {
   renagTimer = null,
   assignee = null,
   pendingImport = null;
-const APP_VERSION = "2026.07.18-22";
+const APP_VERSION = "2026.07.18-23";
 let swRegistration = null,
   updateBannerShown = !1;
 const save = () => {
@@ -189,6 +189,75 @@ const save = () => {
       }),
       collapseProfiles());
   };
+let authRecoveryPromise = null,
+  authExpiredNoticeShown = false;
+async function recoverDaysieSession() {
+  if (authRecoveryPromise) return authRecoveryPromise;
+  authRecoveryPromise = (async () => {
+    try {
+      const response = await fetch(`${API}/api/auth/get-session`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!response.ok) return false;
+      const data = await response.json().catch(() => null);
+      const token =
+        response.headers.get("set-auth-token") || data?.session?.token;
+      if (!token || !data?.user?.id) return false;
+      settings.authToken = token;
+      settings.userId = data.user.id;
+      settings.authProvider = "better-auth";
+      settings.authEmail = data.user.email || settings.authEmail;
+      settings.authUsername = data.user.username || settings.authUsername;
+      authExpiredNoticeShown = false;
+      saveSettings();
+      return true;
+    } catch {
+      return false;
+    } finally {
+      authRecoveryPromise = null;
+    }
+  })();
+  return authRecoveryPromise;
+}
+function expireDaysieSession() {
+  const wasSignedIn = Boolean(settings.authToken);
+  settings.authToken = null;
+  settings.userId = null;
+  settings.authProvider = null;
+  settings.authEmail = null;
+  settings.authUsername = null;
+  settings.syncState = "signed-out";
+  saveSettings();
+  updateAccountUI();
+  updateSyncStatus();
+  if (wasSignedIn && !authExpiredNoticeShown) {
+    authExpiredNoticeShown = true;
+    toast(
+      "Sign in again",
+      "Your secure session expired. Sign in once to reconnect notifications and family sharing.",
+    );
+  }
+}
+async function daysieAuthenticatedFetch(url, options = {}) {
+  const send = () => {
+    const headers = new Headers(options.headers || {});
+    if (settings.authToken)
+      headers.set("Authorization", `Bearer ${settings.authToken}`);
+    else headers.delete("Authorization");
+    return fetch(url, {
+      ...options,
+      credentials: "include",
+      headers,
+    });
+  };
+  let response = await send();
+  if (response.status !== 401) return response;
+  if (await recoverDaysieSession()) response = await send();
+  if (response.status === 401) expireDaysieSession();
+  return response;
+}
+window.daysieAuthenticatedFetch = daysieAuthenticatedFetch;
 function collapseProfiles() {
   if (!Array.isArray(db.profiles) || 0 === db.profiles.length)
     return (
@@ -2264,7 +2333,7 @@ async function enableNotifications() {
         ),
       });
     (
-      await fetch(`${API}/push/subscribe`, {
+      await daysieAuthenticatedFetch(`${API}/push/subscribe`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2310,7 +2379,7 @@ async function refreshPushSubscription() {
       });
     settings.pushSubscription = t;
     saveSettings();
-    const response = await fetch(`${API}/push/subscribe`, {
+    const response = await daysieAuthenticatedFetch(`${API}/push/subscribe`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
