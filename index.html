@@ -856,15 +856,41 @@
               <div id="backupList" class="feature-list"></div>
             </section>
             <section class="settings-feature-card" aria-labelledby="notificationPrefsTitle">
-              <div class="feature-heading"><span>🔔</span><div><b id="notificationPrefsTitle">Notification preferences</b><small>Choose categories and quiet hours in your timezone.</small></div></div>
+              <div class="feature-heading"><span>🔔</span><div><b id="notificationPrefsTitle">Notification preferences</b><small>Choose what reaches you, how alerts feel, and when Daysie stays quiet.</small></div></div>
               <div class="category-grid">
                 <label class="check-row"><input id="notifyReminders" type="checkbox" checked /><span>Reminders</span></label>
                 <label class="check-row"><input id="notifyFamily" type="checkbox" checked /><span>Family updates</span></label>
                 <label class="check-row"><input id="notifyLists" type="checkbox" checked /><span>Shared lists</span></label>
               </div>
+              <div class="notification-alert-grid">
+                <label for="notificationTone">Tone
+                  <select id="notificationTone" class="fam-select">
+                    <option value="system">System default</option>
+                    <option value="gentle">Daysie bloom</option>
+                    <option value="bright">Bright chime</option>
+                    <option value="soft">Soft tap</option>
+                    <option value="none">Silent</option>
+                  </select>
+                </label>
+                <label for="notificationVibration">Vibration
+                  <select id="notificationVibration" class="fam-select">
+                    <option value="system">System default</option>
+                    <option value="light">Light</option>
+                    <option value="standard">Standard</option>
+                    <option value="strong">Strong</option>
+                    <option value="none">Off</option>
+                  </select>
+                </label>
+              </div>
+              <small id="notificationPlatformNote" class="notification-platform-note"></small>
               <div class="time-grid"><label>Quiet from<input id="quietStart" type="time" value="22:00" /></label><label>Quiet until<input id="quietEnd" type="time" value="07:00" /></label></div>
               <small id="timezoneLabel" class="field-hint"></small>
               <button type="button" id="saveNotificationPrefsBtn" class="soft wide">Save notification preferences</button>
+              <div class="notification-test-actions">
+                <button type="button" id="previewNotificationToneBtn" class="text-button">Preview tone</button>
+                <button type="button" id="sendTestNotificationBtn" class="text-button">Send test notification</button>
+              </div>
+              <div id="notificationDeviceList" class="feature-list"><small>Enable push notifications to connect this device.</small></div>
             </section>
             <section class="settings-feature-card" aria-labelledby="pwaHealthTitle">
               <div class="feature-heading"><span>🩺</span><div><b id="pwaHealthTitle">App health</b><small>Checks cloud services, offline support, notifications, and photo storage.</small></div></div>

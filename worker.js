@@ -451,8 +451,8 @@ export default {
       if ("/notification-preferences" === p && "GET" === e.method) {
         const userId = await r(e, E);
         if (!userId) return c({ error: "Unauthorized" }, 401, m);
-        const row = await E.DB.prepare("SELECT quiet_start, quiet_end, timezone, categories, updated_at FROM notification_preferences WHERE user_id = ?").bind(userId).first();
-        return c(row ? { quietStart: row.quiet_start, quietEnd: row.quiet_end, timezone: row.timezone, categories: JSON.parse(row.categories), updatedAt: row.updated_at } : { quietStart: "22:00", quietEnd: "07:00", timezone: "UTC", categories: { reminders: true, family: true, lists: true } }, 200, m);
+        const row = await E.DB.prepare("SELECT quiet_start, quiet_end, timezone, categories, tone, vibration, updated_at FROM notification_preferences WHERE user_id = ?").bind(userId).first();
+        return c(row ? { quietStart: row.quiet_start, quietEnd: row.quiet_end, timezone: row.timezone, categories: JSON.parse(row.categories), tone: notificationChoice(row.tone, ["system", "gentle", "bright", "soft", "none"]), vibration: notificationChoice(row.vibration, ["system", "light", "standard", "strong", "none"]), updatedAt: row.updated_at } : { quietStart: "22:00", quietEnd: "07:00", timezone: "UTC", categories: { reminders: true, family: true, lists: true }, tone: "system", vibration: "system" }, 200, m);
       }
       if ("/notification-preferences" === p && "PUT" === e.method) {
         const userId = await r(e, E);
@@ -463,7 +463,9 @@ export default {
         const quietStart = timePattern.test(body.quietStart || "") ? body.quietStart : null;
         const quietEnd = timePattern.test(body.quietEnd || "") ? body.quietEnd : null;
         const categories = { reminders: body.categories?.reminders !== false, family: body.categories?.family !== false, lists: body.categories?.lists !== false };
-        await E.DB.prepare("INSERT OR REPLACE INTO notification_preferences (user_id, quiet_start, quiet_end, timezone, categories, updated_at) VALUES (?, ?, ?, ?, ?, ?)").bind(userId, quietStart, quietEnd, timezone, JSON.stringify(categories), Date.now()).run();
+        const tone = notificationChoice(body.tone, ["system", "gentle", "bright", "soft", "none"]);
+        const vibration = notificationChoice(body.vibration, ["system", "light", "standard", "strong", "none"]);
+        await E.DB.prepare("INSERT OR REPLACE INTO notification_preferences (user_id, quiet_start, quiet_end, timezone, categories, tone, vibration, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(userId, quietStart, quietEnd, timezone, JSON.stringify(categories), tone, vibration, Date.now()).run();
         return c({ success: true }, 200, m);
       }
       if ("/backups" === p && "GET" === e.method) {
@@ -534,19 +536,59 @@ export default {
         return c({ success: true }, 200, m);
       }
       if ("/push/subscribe" === p && "POST" === e.method) {
-        const i = await r(e, E);
-        if (!i) return c({ error: "Unauthorized" }, 401, m);
-        const t = await e.json();
-        if (!isSafePushEndpoint(t))
+        const userId = await r(e, E);
+        if (!userId) return c({ error: "Unauthorized" }, 401, m);
+        const body = await e.json();
+        const subscription = body.subscription || body;
+        if (!isSafePushEndpoint(subscription))
           return c({ error: "Invalid push endpoint" }, 400, m);
-        return (
-          await E.DB.prepare(
-            "INSERT OR REPLACE INTO push_subscriptions (user_id, subscription, created_at) VALUES (?, ?, ?)",
-          )
-            .bind(i, JSON.stringify(t), Date.now())
-            .run(),
-          c({ success: !0 }, 200, m)
-        );
+        const now = Date.now();
+        const endpoint = String(subscription.endpoint);
+        const deviceName = d(body.deviceName, 48) || friendlyDeviceName(e.headers.get("User-Agent"));
+        await E.DB.prepare(
+          `INSERT INTO push_subscriptions (id, user_id, endpoint, subscription, device_name, user_agent, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, subscription = excluded.subscription,
+             device_name = excluded.device_name, user_agent = excluded.user_agent, updated_at = excluded.updated_at`,
+        ).bind(crypto.randomUUID(), userId, endpoint, JSON.stringify(subscription), deviceName, e.headers.get("User-Agent"), now, now).run();
+        const count = await E.DB.prepare("SELECT COUNT(*) AS count FROM push_subscriptions WHERE user_id = ?").bind(userId).first();
+        return c({ success: true, devices: Number(count?.count || 0) }, 200, m);
+      }
+      if ("/push/status" === p && "GET" === e.method) {
+        const userId = await r(e, E);
+        if (!userId) return c({ error: "Unauthorized" }, 401, m);
+        const rows = await E.DB.prepare(
+          "SELECT id, device_name, user_agent, created_at, updated_at, last_success_at, last_failure_at, last_status FROM push_subscriptions WHERE user_id = ? ORDER BY updated_at DESC",
+        ).bind(userId).all();
+        return c({
+          devices: (rows.results || []).map((row) => ({
+            id: row.id,
+            name: row.device_name || friendlyDeviceName(row.user_agent),
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+            lastSuccessAt: row.last_success_at,
+            lastFailureAt: row.last_failure_at,
+            lastStatus: row.last_status,
+          })),
+        }, 200, m);
+      }
+      if ("/push/test" === p && "POST" === e.method) {
+        const userId = await r(e, E);
+        if (!userId) return c({ error: "Unauthorized" }, 401, m);
+        if (!(await u(E, `push-test:${userId}`, 5, 10 * 60 * 1000)))
+          return c({ error: "Please wait before sending another test." }, 429, m);
+        const result = await sendPushToUser(E, userId, {
+          title: "🌼 Daysie test notification",
+          body: "Notifications are connected on this device.",
+          tag: `daysie-test-${Date.now()}`,
+          requireInteraction: false,
+          type: "test",
+          url: "/",
+          badgeCount: 1,
+        }, "test", Date.now(), true);
+        return result.attempted
+          ? c({ success: result.sent > 0, ...result }, result.sent > 0 ? 200 : 502, m)
+          : c({ error: "No notification devices are connected yet.", ...result }, 409, m);
       }
       if ("/photo" === p && "POST" === e.method) {
         const i = await r(e, E);
@@ -897,27 +939,14 @@ export default {
               )
                 .bind(r, i)
                 .all();
-              for (const r of a.results) {
-                const a = await e.DB.prepare(
-                  "SELECT subscription FROM push_subscriptions WHERE user_id = ?",
-                )
-                  .bind(r.user_id)
-                  .first();
-                if (!a) continue;
-                const n = JSON.parse(a.subscription),
-                  s = await w(e, n, {
-                    title: "👨‍👩‍👧 " + (t || "Someone") + " joined your family",
-                    body: "You can now share lists and assign tasks in Daysie.",
-                    tag: "fam-join-" + i,
-                    requireInteraction: !1,
-                  });
-                (404 !== s && 410 !== s) ||
-                  (await e.DB.prepare(
-                    "DELETE FROM push_subscriptions WHERE user_id = ?",
-                  )
-                    .bind(r.user_id)
-                    .run());
-              }
+              for (const member of a.results)
+                await sendPushToUser(e, member.user_id, {
+                  title: "👨‍👩‍👧 " + (t || "Someone") + " joined your family",
+                  body: "You can now share lists and assign tasks in Daysie.",
+                  tag: "fam-join-" + i,
+                  requireInteraction: false,
+                  badgeCount: 1,
+                }, "family");
             } catch (e) {
               console.error("notifyFamilyJoined error:", e);
             }
@@ -957,27 +986,14 @@ export default {
                   )
                     .bind(r)
                     .all();
-                  for (const r of a.results) {
-                    const a = await e.DB.prepare(
-                      "SELECT subscription FROM push_subscriptions WHERE user_id = ?",
-                    )
-                      .bind(r.user_id)
-                      .first();
-                    if (!a) continue;
-                    const n = JSON.parse(a.subscription),
-                      s = await w(e, n, {
-                        title: "👋 " + (t || "Someone") + " left your family",
-                        body: "Daysie updated your family roster.",
-                        tag: "fam-left-" + i,
-                        requireInteraction: !1,
-                      });
-                    (404 !== s && 410 !== s) ||
-                      (await e.DB.prepare(
-                        "DELETE FROM push_subscriptions WHERE user_id = ?",
-                      )
-                        .bind(r.user_id)
-                        .run());
-                  }
+                  for (const member of a.results)
+                    await sendPushToUser(e, member.user_id, {
+                      title: "👋 " + (t || "Someone") + " left your family",
+                      body: "Daysie updated your family roster.",
+                      tag: "fam-left-" + i,
+                      requireInteraction: false,
+                      badgeCount: 1,
+                    }, "family");
                 } catch (e) {
                   console.error("notifyFamilyLeft error:", e);
                 }
@@ -1123,28 +1139,15 @@ export default {
                 )
                   .bind(r, i)
                   .all();
-              for (const i of s.results) {
-                const a = await e.DB.prepare(
-                  "SELECT subscription FROM push_subscriptions WHERE user_id = ?",
-                )
-                  .bind(i.user_id)
-                  .first();
-                if (!a) continue;
-                const s = JSON.parse(a.subscription),
-                  o = await w(e, s, {
-                    title: "📝 Shared list updated",
-                    body: n + " " + (t || "updated a shared list") + ".",
-                    tag: "family-list-" + r,
-                    requireInteraction: !1,
-                    type: "family-list-updated",
-                  });
-                (404 !== o && 410 !== o) ||
-                  (await e.DB.prepare(
-                    "DELETE FROM push_subscriptions WHERE user_id = ?",
-                  )
-                    .bind(i.user_id)
-                    .run());
-              }
+              for (const member of s.results)
+                await sendPushToUser(e, member.user_id, {
+                  title: "📝 Shared list updated",
+                  body: n + " " + (t || "updated a shared list") + ".",
+                  tag: "family-list-" + r,
+                  requireInteraction: false,
+                  type: "family-list-updated",
+                  badgeCount: 1,
+                }, "lists");
             } catch (e) {
               console.error("notifyFamilyListUpdated error:", e);
             }
@@ -1306,30 +1309,17 @@ export default {
           const a = t.tasks || [];
           for (const s of a)
             if (!s.done && s.due && s.due <= e && !s.notified) {
-              if (!(await notificationAllowed(r, i, "reminders", e))) continue;
-              const e = await r.DB.prepare(
-                "SELECT subscription FROM push_subscriptions WHERE user_id = ?",
-              )
-                .bind(i)
-                .first();
-              if (e) {
-                const a = JSON.parse(e.subscription),
-                  o = s.assignee ? n.find((e) => e.id === s.assignee) : null,
-                  d = o && o.id !== t.id ? `For ${o.name}: ` : "",
-                  u = await w(r, a, {
-                    title: "⏰ " + s.title,
-                    body: d + (s.note || "Reminder time!"),
-                    tag: s.id,
-                    requireInteraction: "high" === s.priority,
-                  });
-                ((404 !== u && 410 !== u) ||
-                  (await r.DB.prepare(
-                    "DELETE FROM push_subscriptions WHERE user_id = ?",
-                  )
-                    .bind(i)
-                    .run()),
-                  u >= 200 && u < 500 && (s.notified = !0));
-              }
+              const o = s.assignee ? n.find((profile) => profile.id === s.assignee) : null,
+                prefix = o && o.id !== t.id ? `For ${o.name}: ` : "",
+                delivery = await sendPushToUser(r, i, {
+                  title: "⏰ " + s.title,
+                  body: prefix + (s.note || "Reminder time!"),
+                  tag: s.id,
+                  requireInteraction: "high" === s.priority,
+                  type: "reminder",
+                  badgeCount: 1,
+                }, "reminders", e);
+              delivery.sent > 0 && (s.notified = true);
             }
         }
         await r.DB.prepare(
@@ -1344,18 +1334,7 @@ export default {
         .bind(e)
         .all();
       for (const e of n.results) {
-        if (!(await notificationAllowed(r, e.to_user, "family", Date.now()))) continue;
-        (await r.DB.prepare(
-          "SELECT subscription FROM push_subscriptions WHERE user_id = ?",
-        )
-          .bind(e.to_user)
-          .first())
-          ? await a(r, e)
-          : await r.DB.prepare(
-              "UPDATE assigned_items SET notified = 1 WHERE id = ?",
-            )
-              .bind(e.id)
-              .run();
+        await a(r, e);
       }
     } catch (e) {
       console.error("Scheduled push error:", e);
@@ -1408,7 +1387,7 @@ async function i(r) {
     r.DB.prepare("CREATE TABLE IF NOT EXISTS device_labels (session_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, created_at INTEGER NOT NULL)"),
     r.DB.prepare("CREATE TABLE IF NOT EXISTS recovery_codes (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, code_hash TEXT NOT NULL UNIQUE, used_at INTEGER, created_at INTEGER NOT NULL)"),
     r.DB.prepare("CREATE TABLE IF NOT EXISTS family_activity (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, user_id TEXT NOT NULL, action TEXT NOT NULL, details TEXT, created_at INTEGER NOT NULL)"),
-    r.DB.prepare("CREATE TABLE IF NOT EXISTS notification_preferences (user_id TEXT PRIMARY KEY, quiet_start TEXT, quiet_end TEXT, timezone TEXT NOT NULL DEFAULT 'UTC', categories TEXT NOT NULL DEFAULT '{\"reminders\":true,\"family\":true,\"lists\":true}', updated_at INTEGER NOT NULL)"),
+    r.DB.prepare("CREATE TABLE IF NOT EXISTS notification_preferences (user_id TEXT PRIMARY KEY, quiet_start TEXT, quiet_end TEXT, timezone TEXT NOT NULL DEFAULT 'UTC', categories TEXT NOT NULL DEFAULT '{\"reminders\":true,\"family\":true,\"lists\":true}', tone TEXT NOT NULL DEFAULT 'system', vibration TEXT NOT NULL DEFAULT 'system', updated_at INTEGER NOT NULL)"),
     r.DB.prepare("CREATE TABLE IF NOT EXISTS encrypted_backups (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, envelope TEXT NOT NULL, size INTEGER NOT NULL, created_at INTEGER NOT NULL)"),
     r.DB.prepare("CREATE TABLE IF NOT EXISTS user_data_versions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, revision INTEGER NOT NULL, data TEXT NOT NULL, source TEXT, created_at INTEGER NOT NULL)"),
     r.DB.prepare("CREATE TABLE IF NOT EXISTS security_events (id TEXT PRIMARY KEY, user_id TEXT, event TEXT NOT NULL, details TEXT, ip TEXT, user_agent TEXT, created_at INTEGER NOT NULL)"),
@@ -1503,20 +1482,72 @@ async function logFamilyActivity(env, familyId, userId, action, details = null) 
   }
 }
 
-async function notificationAllowed(env, userId, category, timestamp = Date.now()) {
-  const row = await env.DB.prepare("SELECT quiet_start, quiet_end, timezone, categories FROM notification_preferences WHERE user_id = ?").bind(userId).first();
-  if (!row) return true;
+function notificationChoice(value, choices, fallback = "system") {
+  return choices.includes(String(value || "")) ? String(value) : fallback;
+}
+
+async function notificationPolicy(env, userId, category, timestamp = Date.now()) {
+  const row = await env.DB.prepare("SELECT quiet_start, quiet_end, timezone, categories, tone, vibration FROM notification_preferences WHERE user_id = ?").bind(userId).first();
+  const policy = {
+    allowed: true,
+    tone: notificationChoice(row?.tone, ["system", "gentle", "bright", "soft", "none"]),
+    vibration: notificationChoice(row?.vibration, ["system", "light", "standard", "strong", "none"]),
+  };
+  if (!row) return policy;
   try {
     const categories = JSON.parse(row.categories || "{}");
-    if (categories[category] === false) return false;
+    if (category !== "test" && categories[category] === false)
+      return { ...policy, allowed: false };
   } catch {}
-  if (!row.quiet_start || !row.quiet_end) return true;
+  if (category === "test" || !row.quiet_start || !row.quiet_end) return policy;
   const timeZone = validTimezone(row.timezone) ? row.timezone : "UTC";
   const parts = new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(timestamp));
   const current = `${parts.find((part) => part.type === "hour")?.value || "00"}:${parts.find((part) => part.type === "minute")?.value || "00"}`;
-  return row.quiet_start < row.quiet_end
+  const allowed = row.quiet_start < row.quiet_end
     ? !(current >= row.quiet_start && current < row.quiet_end)
     : !(current >= row.quiet_start || current < row.quiet_end);
+  return { ...policy, allowed };
+}
+
+async function sendPushToUser(env, userId, payload, category = "reminders", timestamp = Date.now(), bypassQuietHours = false) {
+  const policy = await notificationPolicy(env, userId, category, timestamp);
+  if (!policy.allowed && !bypassQuietHours)
+    return { attempted: 0, sent: 0, failed: 0, suppressed: true };
+  const rows = await env.DB.prepare(
+    "SELECT id, subscription FROM push_subscriptions WHERE user_id = ? ORDER BY updated_at DESC",
+  ).bind(userId).all();
+  let sent = 0,
+    failed = 0;
+  for (const row of rows.results || []) {
+    let status = 0;
+    try {
+      status = await w(env, JSON.parse(row.subscription), {
+        ...payload,
+        tone: policy.tone,
+        vibration: policy.vibration,
+      });
+    } catch (error) {
+      console.error("Stored push subscription is invalid", {
+        subscriptionId: row.id,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (status >= 200 && status < 300) {
+      sent++;
+      await env.DB.prepare(
+        "UPDATE push_subscriptions SET last_success_at = ?, last_status = ? WHERE id = ?",
+      ).bind(Date.now(), status, row.id).run();
+    } else {
+      failed++;
+      if (status === 404 || status === 410)
+        await env.DB.prepare("DELETE FROM push_subscriptions WHERE id = ?").bind(row.id).run();
+      else
+        await env.DB.prepare(
+          "UPDATE push_subscriptions SET last_failure_at = ?, last_status = ? WHERE id = ?",
+        ).bind(Date.now(), status, row.id).run();
+    }
+  }
+  return { attempted: (rows.results || []).length, sent, failed, suppressed: false };
 }
 async function t(e, r, i, t, a) {
   const n = await e.DB.prepare(
@@ -1544,14 +1575,7 @@ async function t(e, r, i, t, a) {
 }
 async function a(e, r) {
   try {
-    const i = await e.DB.prepare(
-      "SELECT subscription FROM push_subscriptions WHERE user_id = ?",
-    )
-      .bind(r.to_user)
-      .first();
-    if (!i) return;
-    const t = JSON.parse(i.subscription),
-      a = JSON.parse(r.payload || "{}"),
+    const a = JSON.parse(r.payload || "{}"),
       n = await e.DB.prepare(
         "SELECT name FROM family_members WHERE user_id = ?",
       )
@@ -1563,23 +1587,18 @@ async function a(e, r) {
           ? "🔔 " + (a.title || "Reminder")
           : "📋 " + (a.title || "New task"),
       d = "reminder" === r.kind ? "From " + s : s + " assigned you a task",
-      u = await w(e, t, {
+      delivery = await sendPushToUser(e, r.to_user, {
         title: o,
         body: d,
         tag: r.id,
-        requireInteraction: !1,
-      });
-    ((404 !== u && 410 !== u) ||
-      (await e.DB.prepare("DELETE FROM push_subscriptions WHERE user_id = ?")
-        .bind(r.to_user)
-        .run()),
-      u >= 200 &&
-        u < 500 &&
-        (await e.DB.prepare(
-          "UPDATE assigned_items SET notified = 1 WHERE id = ?",
-        )
-          .bind(r.id)
-          .run()));
+        requireInteraction: false,
+        type: r.kind,
+        badgeCount: 1,
+      }, "family");
+    delivery.sent > 0 &&
+      (await e.DB.prepare(
+        "UPDATE assigned_items SET notified = 1 WHERE id = ?",
+      ).bind(r.id).run());
   } catch (e) {
     console.error("pushAssignedItem error:", e);
   }
