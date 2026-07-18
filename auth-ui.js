@@ -1,5 +1,7 @@
 const PENDING_FAMILY_INVITE_KEY = "daysie.pendingFamilyInvite";
 const turnstileWidgets = new WeakMap();
+let pendingTwoFactorEmail = "";
+let pendingFamilyInvite = null;
 
 function renderTurnstile(form) {
   const widget = form?.querySelector(".cf-turnstile");
@@ -60,6 +62,7 @@ function showAuthPanel(panel) {
     reset: $("#passwordResetRequestForm"),
     newPassword: $("#newPasswordForm"),
     recovery: $("#recoverySignInForm"),
+    twoFactor: $("#twoFactorSignInForm"),
   };
   Object.entries(panels).forEach(([name, element]) =>
     element?.classList.toggle("hidden", name !== panel),
@@ -93,6 +96,7 @@ function openAuthEntry(panel) {
 async function authRequest(path, body, token) {
   const response = await fetch(`${API}/api/auth${path}`, {
     method: "POST",
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -127,7 +131,10 @@ function getTurnstileToken(form) {
 }
 
 async function finishEmailAuth(result, email, isNewAccount) {
-  const token = result.response.headers.get("set-auth-token");
+  const token =
+    result.data?.token ||
+    result.data?.data?.token ||
+    result.response.headers.get("set-auth-token");
   const user = result.data.user || result.data.data?.user;
   if (!token || !user?.id) {
     throw new Error("Daysie could not start your secure session. Please try again.");
@@ -180,6 +187,7 @@ async function createFamilyInviteFromSettings(email = "") {
       name: profile.name,
       emoji: profile.emoji,
       color: profile.color,
+      expiresMinutes: Number($("#settingsFamilyInviteDuration")?.value || 1440),
     }),
   });
   const data = await response.json().catch(() => ({}));
@@ -197,6 +205,15 @@ async function createFamilyInviteFromSettings(email = "") {
   if (code) code.textContent = data.code;
   if (expiry)
     expiry.textContent = `Expires in about ${Math.max(1, Math.round((data.expires - Date.now()) / 60000))} minutes · Tap the code to copy`;
+  pendingFamilyInvite = data;
+  const inviteUrl = `${location.origin}${location.pathname}?familyInvite=${encodeURIComponent(data.code)}`;
+  if (window.daysieQRCode && $("#familyInviteQr")) {
+    window.daysieQRCode.toCanvas($("#familyInviteQr"), inviteUrl, {
+      width: 180,
+      margin: 1,
+      color: { dark: "#332b24", light: "#ffffff" },
+    }).catch(() => {});
+  }
   if (email) $("#settingsFamilyEmail").value = "";
   if (typeof loadFamily === "function") await loadFamily();
   return data;
@@ -264,11 +281,63 @@ $("#signInForm")?.addEventListener("submit", async (event) => {
       rememberMe: true,
       turnstileToken,
     });
+    if (result.data?.twoFactorRedirect) {
+      pendingTwoFactorEmail = useEmail ? identifier : "";
+      showAuthPanel("twoFactor");
+      setTimeout(() => $("#twoFactorSignInCode")?.focus(), 0);
+      return;
+    }
     await finishEmailAuth(result, useEmail ? identifier : "", false);
   } catch (error) {
     setAuthStatus(error.message, true);
   } finally {
     resetTurnstile(form);
+    setButtonBusy(button, false);
+  }
+});
+
+$("#backFromTwoFactorBtn")?.addEventListener("click", () => {
+  pendingTwoFactorEmail = "";
+  showAuthPanel("signIn");
+});
+
+$("#useTwoFactorBackupBtn")?.addEventListener("click", (event) => {
+  const form = $("#twoFactorSignInForm");
+  const usingBackup = form?.dataset.method !== "backup";
+  if (form) form.dataset.method = usingBackup ? "backup" : "totp";
+  event.currentTarget.textContent = usingBackup
+    ? "Use an authenticator code instead"
+    : "Use this as a backup code";
+  const input = $("#twoFactorSignInCode");
+  if (input) {
+    input.value = "";
+    input.maxLength = usingBackup ? 32 : 12;
+    input.inputMode = usingBackup ? "text" : "numeric";
+    input.focus();
+  }
+});
+
+$("#twoFactorSignInForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = $("#verifyTwoFactorSignInBtn");
+  setButtonBusy(button, true, "Verifying…");
+  setAuthStatus("");
+  try {
+    const backup = form.dataset.method === "backup";
+    const result = await authRequest(
+      backup ? "/two-factor/verify-backup-code" : "/two-factor/verify-totp",
+      {
+        code: $("#twoFactorSignInCode").value.trim(),
+        trustDevice: $("#trustTwoFactorDevice").checked,
+      },
+    );
+    await finishEmailAuth(result, pendingTwoFactorEmail, false);
+    pendingTwoFactorEmail = "";
+    form.reset();
+  } catch (error) {
+    setAuthStatus(error.message, true);
+  } finally {
     setButtonBusy(button, false);
   }
 });
@@ -328,7 +397,7 @@ $("#changePasswordForm")?.addEventListener("submit", async (event) => {
       "/change-password",
       {
         currentPassword: $("#currentPassword").value,
-        newPassword: $("#newPassword").value,
+        newPassword: $("#changeNewPassword").value,
         revokeOtherSessions,
       },
       settings.authToken,
@@ -449,6 +518,25 @@ $("#copyFamilyInviteCode")?.addEventListener("click", async (event) => {
     toast("Code copied", "Share it with your family member.");
   } catch {
     toast("Invite code", code);
+  }
+});
+
+$("#shareFamilyInviteBtn")?.addEventListener("click", async () => {
+  if (!pendingFamilyInvite?.code) return;
+  const url = `${location.origin}${location.pathname}?familyInvite=${encodeURIComponent(pendingFamilyInvite.code)}`;
+  const share = {
+    title: "Join my family on Daysie",
+    text: `Use code ${pendingFamilyInvite.code} to join my Daysie family.`,
+    url,
+  };
+  try {
+    if (navigator.share) await navigator.share(share);
+    else {
+      await navigator.clipboard.writeText(`${share.text} ${url}`);
+      toast("Invite copied", "Share it with your family member.");
+    }
+  } catch (error) {
+    if (error?.name !== "AbortError") toast("Could not share", error.message);
   }
 });
 

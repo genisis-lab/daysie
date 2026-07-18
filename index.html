@@ -19,6 +19,7 @@
     ></script>
   </head>
   <body>
+    <a class="skip-link" href="#app">Skip to Daysie content</a>
     <canvas id="garden"></canvas>
     <div id="toastHost"></div>
 
@@ -97,6 +98,7 @@
           </div>
         </div>
         <div class="topbar-right">
+          <button id="globalSearchBtn" class="icon-btn" title="Search everything" aria-label="Search everything">⌕</button>
           <button id="profileBtn" class="profile-btn" title="Family">
             <span id="profileEmoji">🌼</span><span id="profileName">Me</span>
           </button>
@@ -143,6 +145,7 @@
             Add
           </button>
         </div>
+        <div id="quickAddTodayPreview" class="quick-preview hidden" aria-live="polite"></div>
         <div id="todayTasks"></div>
 
         <div class="section-head">
@@ -200,6 +203,7 @@
             Add
           </button>
         </div>
+        <div id="quickAddTasksPreview" class="quick-preview hidden" aria-live="polite"></div>
         <div class="filter-bar">
           <button class="chip-filter active" data-filter="all">All</button>
           <button class="chip-filter" data-filter="today">Today</button>
@@ -349,7 +353,9 @@
         <div id="repeatPicker" class="chips">
           <button type="button" data-repeat="none">Once</button>
           <button type="button" data-repeat="daily">Daily</button>
+          <button type="button" data-repeat="weekdays">Weekdays</button>
           <button type="button" data-repeat="weekly">Weekly</button>
+          <button type="button" data-repeat="biweekly">Every 2 weeks</button>
           <button type="button" data-repeat="monthly">Monthly</button>
           <button type="button" data-repeat="yearly">Yearly 🎂</button>
         </div>
@@ -466,6 +472,20 @@
           <hr style="border-color: var(--line); margin: 16px 0" />
           <h3>👪 Your family</h3>
           <div id="familyMembers" class="family-members"></div>
+          <label for="familyAvailability">My availability
+            <select id="familyAvailability" class="fam-select"><option value="free">Free</option><option value="busy">Busy</option><option value="away">Away</option><option value="quiet">Quiet time</option></select>
+          </label>
+          <div id="familyDashboard" class="family-dashboard"><small>Sign in to see your family dashboard.</small></div>
+          <details class="feature-details family-event-editor">
+            <summary>Add a family calendar event</summary>
+            <form id="familyEventForm" class="auth-form">
+              <label for="familyEventTitle">Event name</label><input id="familyEventTitle" maxlength="100" required />
+              <label for="familyEventStart">Starts</label><input id="familyEventStart" type="datetime-local" required />
+              <label for="familyEventRecurrence">Repeats</label><select id="familyEventRecurrence" class="fam-select"><option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekdays">Weekdays</option><option value="weekly">Weekly</option><option value="biweekly">Every 2 weeks</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select>
+              <label for="familyEventNote">Note</label><textarea id="familyEventNote" maxlength="1000"></textarea>
+              <button type="submit" class="primary wide">Add to family calendar</button>
+            </form>
+          </details>
           <div class="row" style="margin-top: 10px">
             <button type="button" id="famInviteBtn" class="primary">
               ➕ Invite a member
@@ -627,6 +647,16 @@
               <input id="recoveryCode" autocomplete="one-time-code" required placeholder="DAY-XXXX-XXXX" />
               <button type="submit" class="primary wide">Recover account</button>
             </form>
+            <form id="twoFactorSignInForm" class="auth-form hidden">
+              <button type="button" id="backFromTwoFactorBtn" class="text-button auth-back">← Back to sign in</button>
+              <h4>Two-step verification</h4>
+              <p class="field-hint">Enter the six-digit code from your authenticator app, or use a backup code.</p>
+              <label for="twoFactorSignInCode">Verification code</label>
+              <input id="twoFactorSignInCode" inputmode="numeric" autocomplete="one-time-code" maxlength="12" required />
+              <label class="check-row"><input id="trustTwoFactorDevice" type="checkbox" /><span>Trust this device for 30 days</span></label>
+              <button type="submit" id="verifyTwoFactorSignInBtn" class="primary wide">Verify and sign in</button>
+              <button type="button" id="useTwoFactorBackupBtn" class="text-button">Use this as a backup code</button>
+            </form>
             <form id="signUpForm" class="auth-form hidden">
               <label for="signUpName">Your name</label>
               <input id="signUpName" maxlength="40" autocomplete="name" required placeholder="e.g. Alex" />
@@ -727,8 +757,8 @@
               <form id="changePasswordForm" class="auth-form account-security-form">
                 <label for="currentPassword">Current password</label>
                 <input id="currentPassword" type="password" autocomplete="current-password" required />
-                <label for="newPassword">New password</label>
-                <input id="newPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required />
+                <label for="changeNewPassword">New password</label>
+                <input id="changeNewPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required />
                 <label class="check-row" for="revokeOtherPasswordSessions">
                   <input id="revokeOtherPasswordSessions" type="checkbox" checked />
                   <span>Log out other devices after changing my password</span>
@@ -740,8 +770,32 @@
             <section class="settings-feature-card" aria-labelledby="passkeyTitle">
               <div class="feature-heading"><span>🔑</span><div><b id="passkeyTitle">Passkeys &amp; recovery</b><small>Use Face ID, Touch ID, or a device PIN. Keep one-time codes somewhere safe.</small></div></div>
               <button type="button" id="addPasskeyBtn" class="soft wide">Add a passkey</button>
+              <div id="passkeyList" class="feature-list"><small>Loading passkeys…</small></div>
               <button type="button" id="generateRecoveryCodesBtn" class="soft wide">Generate new recovery codes</button>
               <div id="recoveryCodesResult" class="feature-result hidden"></div>
+            </section>
+            <section class="settings-feature-card" aria-labelledby="twoFactorTitle">
+              <div class="feature-heading"><span>🛡️</span><div><b id="twoFactorTitle">Two-step verification</b><small>Protect password sign-in with an authenticator app and one-time backup codes.</small></div></div>
+              <p id="twoFactorStatus" class="field-hint">Checking status…</p>
+              <form id="enableTwoFactorForm" class="auth-form">
+                <label for="twoFactorPassword">Current password</label>
+                <input id="twoFactorPassword" type="password" autocomplete="current-password" required />
+                <button type="submit" id="enableTwoFactorBtn" class="soft wide">Set up authenticator</button>
+              </form>
+              <div id="twoFactorSetupResult" class="feature-result hidden">
+                <p><b>Scan in your authenticator app</b></p>
+                <canvas id="twoFactorQr" class="qr-code" aria-label="Authenticator QR code"></canvas>
+                <button type="button" id="copyTwoFactorUriBtn" class="text-button">Copy setup key instead</button>
+                <label for="twoFactorSetupCode">Enter the app’s six-digit code</label>
+                <input id="twoFactorSetupCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" />
+                <button type="button" id="confirmTwoFactorBtn" class="primary wide">Confirm and turn on</button>
+                <div id="twoFactorBackupCodes" class="backup-code-grid"></div>
+              </div>
+              <form id="disableTwoFactorForm" class="auth-form hidden">
+                <label for="disableTwoFactorPassword">Current password</label>
+                <input id="disableTwoFactorPassword" type="password" autocomplete="current-password" required />
+                <button type="submit" id="disableTwoFactorBtn" class="soft wide">Turn off two-step verification</button>
+              </form>
             </section>
             <section class="settings-feature-card" aria-labelledby="devicesTitle">
               <div class="feature-heading"><span>📱</span><div><b id="devicesTitle">Signed-in devices</b><small>Rename devices and log out any session individually.</small></div></div>
@@ -762,15 +816,37 @@
                   <input id="settingsFamilyEmail" type="email" autocomplete="email" required placeholder="family@example.com" />
                   <button type="submit" id="settingsFamilyInviteBtn" class="primary">Send invite</button>
                 </div>
+                <label for="settingsFamilyInviteDuration">Invite expires</label>
+                <select id="settingsFamilyInviteDuration" class="fam-select"><option value="60">In 1 hour</option><option value="1440" selected>In 24 hours</option><option value="10080">In 7 days</option></select>
               </form>
               <button type="button" id="settingsFamilyCodeBtn" class="soft wide">Create a shareable code</button>
               <div id="settingsFamilyInviteResult" class="invite-result hidden" role="status" aria-live="polite">
                 <small id="settingsFamilyInviteMessage"></small>
                 <button type="button" id="copyFamilyInviteCode" class="invite-code-button" aria-label="Copy family invite code"></button>
+                <canvas id="familyInviteQr" class="qr-code" aria-label="Family invite QR code"></canvas>
+                <button type="button" id="shareFamilyInviteBtn" class="soft wide">Share invite</button>
                 <small id="settingsFamilyInviteExpiry"></small>
               </div>
               <div id="pendingInviteList" class="feature-list"></div>
               <details class="feature-details"><summary>Recent family activity</summary><div id="familyActivityList" class="feature-list"></div></details>
+            </section>
+            <section class="settings-feature-card" aria-labelledby="syncHistoryTitle">
+              <div class="feature-heading"><span>🕘</span><div><b id="syncHistoryTitle">Sync history &amp; undo</b><small>Daysie automatically merges changes and keeps the latest 20 cloud versions.</small></div></div>
+              <div id="syncHistoryList" class="feature-list"><small>Loading history…</small></div>
+              <button type="button" id="refreshSyncHistoryBtn" class="text-button">Refresh history</button>
+            </section>
+            <section class="settings-feature-card" aria-labelledby="securityActivityTitle">
+              <div class="feature-heading"><span>🔎</span><div><b id="securityActivityTitle">Security activity</b><small>Review recent sign-ins, account changes, and protective checks.</small></div></div>
+              <div id="securityActivityList" class="feature-list"><small>Loading activity…</small></div>
+            </section>
+            <section class="settings-feature-card" aria-labelledby="storageTitle">
+              <div class="feature-heading"><span>💾</span><div><b id="storageTitle">Storage dashboard</b><small>See what is using local and cloud storage.</small></div></div>
+              <div id="storageDashboard" class="storage-grid"><small>Calculating storage…</small></div>
+            </section>
+            <section class="settings-feature-card" aria-labelledby="trashTitle">
+              <div class="feature-heading"><span>🗑️</span><div><b id="trashTitle">Recently deleted</b><small>Restore deleted reminders, journal entries, and lists for 30 days.</small></div></div>
+              <div id="trashList" class="feature-list"><small>Trash is empty.</small></div>
+              <button type="button" id="emptyTrashBtn" class="text-button danger-text">Empty trash</button>
             </section>
             <section class="settings-feature-card" aria-labelledby="backupTitle">
               <div class="feature-heading"><span>🛟</span><div><b id="backupTitle">Encrypted backup history</b><small>Backups are encrypted on this device before upload. Your recovery key stays with you.</small></div></div>
@@ -983,6 +1059,16 @@
           <button type="button" class="soft" data-routine-template="morning">☀️ Morning routine</button>
           <button type="button" class="soft" data-routine-template="weekly">🧹 Weekly reset</button>
         </div>
+        <details class="feature-details">
+          <summary>Create a household routine</summary>
+          <form id="routineForm" class="auth-form">
+            <label for="routineName">Routine name</label><input id="routineName" maxlength="60" required placeholder="Bedtime reset" />
+            <label for="routineSteps">Steps, one per line</label><textarea id="routineSteps" required placeholder="Put dishes away&#10;Set out clothes&#10;Lock the doors"></textarea>
+            <label for="routineRepeat">Schedule</label><select id="routineRepeat" class="fam-select"><option value="daily">Daily</option><option value="weekdays">Weekdays</option><option value="weekly">Weekly</option><option value="biweekly">Every 2 weeks</option><option value="monthly">Monthly</option></select>
+            <button type="submit" class="soft wide">Save routine</button>
+          </form>
+          <div id="routineList" class="feature-list"></div>
+        </details>
         <hr style="border-color: var(--line); margin: 14px 0" />
         <label
           >New list<input
@@ -1000,6 +1086,25 @@
         >
           Create list 📝
         </button>
+      </div>
+    </dialog>
+
+    <dialog id="globalSearchDialog">
+      <div class="modal">
+        <div class="modal-head"><h2>Search Daysie</h2><button type="button" id="closeGlobalSearch" class="modal-close" aria-label="Close search">✕</button></div>
+        <label for="globalSearchInput">Tasks, journal, lists, routines, and family events</label>
+        <input id="globalSearchInput" type="search" autocomplete="off" placeholder="Start typing…" />
+        <div class="filter-bar" id="globalSearchFilters"><button class="chip-filter active" data-search-kind="all">All</button><button class="chip-filter" data-search-kind="tasks">Tasks</button><button class="chip-filter" data-search-kind="journal">Journal</button><button class="chip-filter" data-search-kind="lists">Lists</button><button class="chip-filter" data-search-kind="family">Family</button></div>
+        <div id="globalSearchResults" class="feature-list" role="status" aria-live="polite"></div>
+      </div>
+    </dialog>
+
+    <dialog id="importPreviewDialog">
+      <div class="modal">
+        <div class="modal-head"><h2>Review import</h2><button type="button" id="closeImportPreview" class="modal-close" aria-label="Close import preview">✕</button></div>
+        <div id="importPreviewSummary" class="storage-grid"></div>
+        <p class="field-hint">Choose merge to keep existing items, or replace to use only the imported backup.</p>
+        <div class="row modal-actions"><button type="button" id="mergeImportBtn" class="soft">Merge</button><button type="button" id="replaceImportBtn" class="primary">Replace</button></div>
       </div>
     </dialog>
 
@@ -1078,5 +1183,6 @@
     <script defer src="app3.js"></script>
     <script defer src="auth-ui.js"></script>
     <script defer src="account-features.js"></script>
+    <script defer src="power-features.js"></script>
   </body>
 </html>

@@ -412,3 +412,30 @@ button:disabled{cursor:not-allowed;opacity:.55}
 .category-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.time-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.time-grid label{font-size:.82rem;font-weight:900}.time-grid input{display:block;width:100%;margin-top:4px}.health-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.health-grid>div{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:6px;padding:9px;border-radius:12px;background:var(--bg2)}.health-grid small{grid-column:2;color:var(--soft)}.template-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 body[data-theme=dark] .danger-zone{background:#401f26;border-color:#7b3945}
 @media(max-width:520px){.category-grid{grid-template-columns:1fr}.health-grid,.template-grid{grid-template-columns:1fr}.feature-row{align-items:flex-start;flex-direction:column}.row-actions{justify-content:flex-start}.time-grid{grid-template-columns:1fr}}
+.skip-link{position:fixed;z-index:999;left:12px;top:12px;transform:translateY(-160%);padding:10px 14px;border-radius:12px;background:var(--ink);color:var(--card);font-weight:900}
+.skip-link:focus{transform:translateY(0)}
+.quick-preview{margin:-8px 0 14px;padding:8px 11px;border:1px solid var(--line);border-radius:12px;background:var(--bg2);color:var(--soft);font-size:.84rem;font-weight:800}
+.qr-code{display:block;width:180px!important;height:180px!important;max-width:100%;margin:8px auto;border:10px solid #fff;border-radius:16px;background:#fff}
+.backup-code-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:12px;font:800 .86rem/1.4 ui-monospace,SFMono-Regular,monospace}
+.backup-code-grid code{padding:7px;border-radius:9px;background:var(--card);text-align:center}
+.storage-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.storage-stat{padding:11px;border-radius:13px;background:var(--bg2)}
+.storage-stat b,.storage-stat small{display:block}.storage-stat small{margin-top:3px;color:var(--soft)}
+.family-dashboard{display:grid;gap:8px;margin:12px 0}
+.family-summary{padding:12px;border:1px solid var(--line);border-radius:14px;background:var(--bg2)}
+.family-summary h4{margin:0 0 8px}.family-summary p{margin:5px 0;color:var(--soft);font-weight:700}
+.availability-dot{display:inline-block;width:10px;height:10px;margin-right:5px;border-radius:50%;background:var(--green)}
+.availability-dot.busy{background:#ff8c9a}.availability-dot.away{background:#ad97e8}.availability-dot.quiet{background:#79c8ce}
+.family-event-editor{margin:12px 0;padding:0 12px;border:1px solid var(--line);border-radius:14px}
+#globalSearchDialog .modal,#importPreviewDialog .modal{width:min(520px,calc(100vw - 28px))}
+#globalSearchInput{width:100%;min-height:48px;font-size:1.05rem}
+.search-result{width:100%;padding:11px;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--ink);text-align:left}
+.search-result b,.search-result small{display:block}.search-result small{margin-top:3px;color:var(--soft)}
+.undo-banner{position:fixed;z-index:180;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 92px);transform:translateX(-50%);display:flex;align-items:center;gap:12px;width:min(92%,420px);padding:11px 14px;border-radius:15px;background:var(--ink);color:var(--card);box-shadow:var(--shadow);font-weight:800}
+.undo-banner button{margin-left:auto;border:0;background:transparent;color:var(--sun);font-weight:900;min-height:40px}
+.family-event-marker{position:absolute;right:3px;bottom:2px;z-index:2;font-size:.62rem;line-height:1;padding:2px 3px;border-radius:6px;background:var(--card)}
+.list-item>span:last-child{min-width:0}.list-item small{display:block;margin-top:2px;color:var(--soft);font-size:.72rem;text-decoration:none}
+.password-toggle{justify-self:start;min-height:34px!important;padding:0 2px;margin-top:-5px}
+input:focus-visible,textarea:focus-visible,select:focus-visible{outline:3px solid var(--sun2);outline-offset:2px}
+@media(max-width:520px){.storage-grid,.backup-code-grid{grid-template-columns:1fr}.qr-code{width:160px!important;height:160px!important}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}

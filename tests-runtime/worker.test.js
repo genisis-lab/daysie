@@ -31,4 +31,20 @@ describe("Daysie Worker runtime", () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "Complete the security check" });
   });
+
+  it("protects all feature-suite account and family endpoints", async () => {
+    for (const path of [
+      "/features/account/overview",
+      "/features/security/events",
+      "/features/sync/history",
+      "/features/family/dashboard",
+      "/features/family/events",
+      "/features/family/comments?itemId=task-1",
+      "/features/account/storage",
+    ]) {
+      const response = await SELF.fetch(`https://daysie.test${path}`);
+      expect(response.status, path).toBe(401);
+      expect(await response.json(), path).toEqual({ error: "Unauthorized" });
+    }
+  });
 });
