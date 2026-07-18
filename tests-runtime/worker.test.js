@@ -47,4 +47,15 @@ describe("Daysie Worker runtime", () => {
       expect(await response.json(), path).toEqual({ error: "Unauthorized" });
     }
   });
+
+  it("protects notification status and test delivery endpoints", async () => {
+    const status = await SELF.fetch("https://daysie.test/push/status");
+    const testPush = await SELF.fetch("https://daysie.test/push/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(status.status).toBe(401);
+    expect(testPush.status).toBe(401);
+  });
 });

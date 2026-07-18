@@ -101,6 +101,8 @@ let db = {
     authEmail: null,
     authUsername: null,
     pushSubscription: null,
+    notificationTone: "system",
+    notificationVibration: "system",
     syncRevision: 0,
     syncPending: false,
     syncState: "idle",
@@ -124,7 +126,7 @@ let db = {
   renagTimer = null,
   assignee = null,
   pendingImport = null;
-const APP_VERSION = "2026.07.18-21";
+const APP_VERSION = "2026.07.18-22";
 let swRegistration = null,
   updateBannerShown = !1;
 const save = () => {
@@ -306,9 +308,14 @@ function applyTheme() {
       ? (e.content = "#000")
       : (e.content = "#fff7ed");
 }
+function clearNotificationBadge() {
+  if (!("clearAppBadge" in navigator)) return;
+  navigator.clearAppBadge().catch(() => {});
+}
 function boot() {
   (load(),
     applyTheme(),
+    clearNotificationBadge(),
     buildPickers(),
     ($("#dailyQuote").textContent =
       quotes[Math.floor(Math.random() * quotes.length)]),
@@ -347,7 +354,10 @@ function setupServiceWorker() {
     checkVersion(),
     setInterval(checkVersion, 18e5),
     document.addEventListener("visibilitychange", () => {
-      document.hidden || checkVersion();
+      if (!document.hidden) {
+        checkVersion();
+        clearNotificationBadge();
+      }
     }));
 }
 async function checkVersion() {
@@ -1415,7 +1425,8 @@ function checkReminders() {
     o && save());
 }
 function notify(e) {
-  (beep(),
+  (playNotificationTone(),
+    vibrateReminder(),
     toast("⏰ " + e.title, e.note || "Reminder time!"),
     "visible" !== document.visibilityState &&
       "Notification" in window &&
@@ -1441,7 +1452,8 @@ function startRenag() {
         ) {
           const o = Math.floor((t - e.due) / 6e4);
           o % 5 == 0 &&
-            (beep(),
+            (playNotificationTone(),
+            vibrateReminder(),
             toast("⚠️ Still pending: " + e.title, `${o} minutes overdue`),
             "visible" !== document.visibilityState &&
               "Notification" in window &&
@@ -1456,13 +1468,20 @@ function startRenag() {
     }, 6e4)));
 }
 let audioCtx = null;
-function beep() {
+function playNotificationTone(tone = settings.notificationTone || "system") {
+  if (tone === "none") return;
   try {
     (audioCtx ||
       (audioCtx = new (window.AudioContext || window.webkitAudioContext)()),
       "suspended" === audioCtx.state && audioCtx.resume());
     let e = audioCtx;
-    [660, 880, 660].forEach((t, o) => {
+    const notes = {
+      system: [660, 880, 660],
+      gentle: [660, 880, 660],
+      bright: [880, 1175, 1320],
+      soft: [520],
+    }[tone] || [660, 880, 660];
+    notes.forEach((t, o) => {
       let n = e.createOscillator(),
         a = e.createGain();
       ((n.frequency.value = t), n.connect(a), a.connect(e.destination));
@@ -1474,6 +1493,15 @@ function beep() {
         n.stop(s + 0.14));
     });
   } catch (e) {}
+}
+function vibrateReminder(level = settings.notificationVibration || "system") {
+  const patterns = {
+    light: [80],
+    standard: [140, 70, 140],
+    strong: [220, 90, 220, 90, 280],
+  };
+  if (patterns[level] && "vibrate" in navigator)
+    navigator.vibrate(patterns[level]);
 }
 function confetti() {
   for (let e = 0; e < 28; e++) {
@@ -2187,6 +2215,12 @@ async function ensureAccount() {
   $("#signInEmail")?.focus();
   return !1;
 }
+function notificationDeviceName() {
+  const ua = navigator.userAgent;
+  const browser = /Edg\//.test(ua) ? "Edge" : /CriOS|Chrome\//.test(ua) ? "Chrome" : /Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : "Browser";
+  const device = /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android" : /Macintosh/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : "device";
+  return `${browser} on ${device}`;
+}
 async function enableNotifications() {
   if (isIOS() && !isStandalone())
     return toast(
@@ -2236,7 +2270,7 @@ async function enableNotifications() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${settings.authToken}`,
         },
-        body: JSON.stringify(t),
+        body: JSON.stringify({ subscription: t, deviceName: notificationDeviceName() }),
       })
     ).ok
       ? ((settings.pushSubscription = t),
@@ -2267,24 +2301,25 @@ async function refreshPushSubscription() {
     if (isIOS() && !isStandalone()) return;
     const e = await navigator.serviceWorker.ready;
     let t = await e.pushManager.getSubscription();
-    (t ||
-      (t = await e.pushManager.subscribe({
+    if (!t)
+      t = await e.pushManager.subscribe({
         userVisibleOnly: !0,
         applicationServerKey: urlBase64ToUint8Array(
           "BCbfGHSDEXclbsTnL3DjwZxyaLTXhlge4D6wNonqGwOfkLgA19fFyfz7j0nmBD0GxQJp4MNDPfWigOzFvLCyinU",
         ),
-      })),
-      (settings.pushSubscription = t),
-      saveSettings(),
-      await fetch(`${API}/push/subscribe`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${settings.authToken}`,
-        },
-        body: JSON.stringify(t),
-      }),
-      await syncToCloud());
+      });
+    settings.pushSubscription = t;
+    saveSettings();
+    const response = await fetch(`${API}/push/subscribe`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${settings.authToken}`,
+      },
+      body: JSON.stringify({ subscription: t, deviceName: notificationDeviceName() }),
+    });
+    if (!response.ok) throw new Error("Push subscription could not be refreshed");
+    await syncToCloud();
   } catch (e) {
     console.error("Push refresh error:", e);
   }
