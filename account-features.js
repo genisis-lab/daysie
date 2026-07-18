@@ -3,9 +3,9 @@
   const byId = (id) => document.getElementById(id);
   const headers = (json = false) => ({ Authorization: `Bearer ${settings.authToken}`, ...(json ? { "Content-Type": "application/json" } : {}) });
   const request = async (path, options = {}) => {
-    const response = await fetch(`${API}${path}`, { ...options, headers: { ...headers(Boolean(options.body)), ...(options.headers || {}) } });
+    const response = await daysieAuthenticatedFetch(`${API}${path}`, { ...options, headers: { ...headers(Boolean(options.body)), ...(options.headers || {}) } });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || data.message || "Request failed");
+    if (!response.ok) throw new Error(response.status === 401 ? "Your session expired. Sign in again, then retry the notification test." : data.error || data.message || "Request failed");
     return data;
   };
   const safe = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
@@ -20,6 +20,7 @@
     settings.authProvider = "better-auth";
     settings.authEmail = user.email;
     settings.authUsername = user.username || null;
+    authExpiredNoticeShown = false;
     saveSettings();
     updateAccountUI();
     updateSyncStatus();

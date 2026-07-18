@@ -144,6 +144,7 @@ async function finishEmailAuth(result, email, isNewAccount) {
   settings.authProvider = "better-auth";
   settings.authEmail = user.email || email;
   settings.authUsername = user.username || null;
+  authExpiredNoticeShown = false;
   const wasFirstRun = !db.onboarded;
   saveSettings();
   updateAccountUI();
