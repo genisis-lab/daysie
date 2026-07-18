@@ -1175,32 +1175,30 @@ export default {
           return c({ error: "Member not found" }, 404, m);
         const o = crypto.randomUUID(),
           d = Date.now();
-        return (
-          await E.DB.prepare(
-            "INSERT INTO assigned_items (id, family_id, from_user, to_user, kind, payload, fire_at, status, notified, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        await E.DB.prepare(
+          "INSERT INTO assigned_items (id, family_id, from_user, to_user, kind, payload, fire_at, status, notified, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+          .bind(
+            o,
+            t.family_id,
+            i,
+            n,
+            "task",
+            JSON.stringify(s || {}),
+            d,
+            "pending",
+            0,
+            d,
           )
-            .bind(
-              o,
-              t.family_id,
-              i,
-              n,
-              "task",
-              JSON.stringify(s || {}),
-              d,
-              "pending",
-              0,
-              d,
-            )
-            .run(),
-          await a(E, {
-            id: o,
-            to_user: n,
-            from_user: i,
-            kind: "task",
-            payload: JSON.stringify(s || {}),
-          }),
-          c({ success: !0, id: o }, 200, m)
-        );
+          .run();
+        const delivery = await a(E, {
+          id: o,
+          to_user: n,
+          from_user: i,
+          kind: "task",
+          payload: JSON.stringify(s || {}),
+        });
+        return c({ success: true, id: o, delivery }, 200, m);
       }
       if ("/family/remind" === p && "POST" === e.method) {
         const i = await r(e, E);
@@ -1224,22 +1222,21 @@ export default {
           u = Date.now(),
           p = o && o > u ? o : u,
           f = JSON.stringify({ title: s || "Reminder" });
-        return (
-          await E.DB.prepare(
-            "INSERT INTO assigned_items (id, family_id, from_user, to_user, kind, payload, fire_at, status, notified, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          )
-            .bind(d, t.family_id, i, n, "reminder", f, p, "pending", 0, u)
-            .run(),
-          p <= u &&
-            (await a(E, {
+        await E.DB.prepare(
+          "INSERT INTO assigned_items (id, family_id, from_user, to_user, kind, payload, fire_at, status, notified, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+          .bind(d, t.family_id, i, n, "reminder", f, p, "pending", 0, u)
+          .run();
+        const delivery = p <= u
+          ? await a(E, {
               id: d,
               to_user: n,
               from_user: i,
               kind: "reminder",
               payload: f,
-            })),
-          c({ success: !0, id: d }, 200, m)
-        );
+            })
+          : { attempted: 0, sent: 0, failed: 0, scheduled: true };
+        return c({ success: true, id: d, delivery }, 200, m);
       }
       if ("/family/inbox" === p && "GET" === e.method) {
         const i = await r(e, E);
@@ -1599,8 +1596,10 @@ async function a(e, r) {
       (await e.DB.prepare(
         "UPDATE assigned_items SET notified = 1 WHERE id = ?",
       ).bind(r.id).run());
+    return delivery;
   } catch (e) {
     console.error("pushAssignedItem error:", e);
+    return { attempted: 0, sent: 0, failed: 1, suppressed: false };
   }
 }
 function n(e, r) {
