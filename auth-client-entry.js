@@ -1,9 +1,11 @@
 import { createAuthClient } from "better-auth/client";
+import { twoFactorClient } from "better-auth/client/plugins";
 import { passkeyClient } from "@better-auth/passkey/client";
+import QRCode from "qrcode";
 
 const client = createAuthClient({
   baseURL: "https://daysie-api.neil27.workers.dev",
-  plugins: [passkeyClient()],
+  plugins: [passkeyClient(), twoFactorClient()],
   fetchOptions: {
     auth: {
       type: "Bearer",
@@ -20,3 +22,4 @@ const client = createAuthClient({
 });
 
 window.daysieAuthClient = client;
+window.daysieQRCode = QRCode;

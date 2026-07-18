@@ -1,5 +1,5 @@
 import { betterAuth } from "better-auth";
-import { bearer, username } from "better-auth/plugins";
+import { bearer, twoFactor, username } from "better-auth/plugins";
 import { passkey } from "@better-auth/passkey";
 import { sendEmail as sendInfraEmail } from "@better-auth/infra";
 import { withCloudflare } from "better-auth-cloudflare";
@@ -124,6 +124,16 @@ export function createDaysieAuth(env, request, executionContext) {
         },
         plugins: [
           bearer(),
+          twoFactor({
+            issuer: "Daysie",
+            twoFactorCookieMaxAge: 10 * 60,
+            trustDeviceMaxAge: 30 * 24 * 60 * 60,
+            accountLockout: {
+              enabled: true,
+              maxFailedAttempts: 5,
+              durationSeconds: 15 * 60,
+            },
+          }),
           passkey({
             rpID: new URL(appOrigin || "https://daysie.pages.dev").hostname,
             rpName: "Daysie",
@@ -150,12 +160,32 @@ export function createDaysieAuth(env, request, executionContext) {
             partitioned: true,
           },
         },
+        two_factor: {
+          attributes: {
+            secure: true,
+            sameSite: "none",
+            partitioned: true,
+          },
+        },
+        trust_device: {
+          attributes: {
+            secure: true,
+            sameSite: "none",
+            partitioned: true,
+          },
+        },
       },
     },
   });
 }
 
-export function familyInviteEmail({ appUrl, code, inviterName, inviteeEmail }) {
+export function familyInviteEmail({
+  appUrl,
+  code,
+  inviterName,
+  inviteeEmail,
+  expirationMinutes = 1440,
+}) {
   const inviteUrl = `${appUrl}/?familyInvite=${encodeURIComponent(code)}`;
   return {
     template: "application-invite",
@@ -165,7 +195,7 @@ export function familyInviteEmail({ appUrl, code, inviterName, inviteeEmail }) {
       inviterEmail: "family@daysie.app",
       inviteeEmail: inviteeEmail || "family member",
       appName: "Daysie",
-      expirationDays: "1",
+      expirationDays: String(Math.max(1, Math.ceil(expirationMinutes / 1440))),
     },
     subject: `${inviterName || "Someone"} invited you to their Daysie family`,
     html: `
@@ -176,7 +206,7 @@ export function familyInviteEmail({ appUrl, code, inviterName, inviteeEmail }) {
         <p><a href="${escapeHtml(inviteUrl)}" style="display:inline-block;padding:12px 20px;border-radius:12px;background:#b36d08;color:white;text-decoration:none;font-weight:700">Accept family invite</a></p>
         <p>Or open Daysie and enter this code:</p>
         <p style="font-size:28px;letter-spacing:6px;font-weight:800">${escapeHtml(code)}</p>
-        <p style="color:#6f655d;font-size:14px">This invite expires in 15 minutes. If you were not expecting it, you can ignore this email.</p>
+        <p style="color:#6f655d;font-size:14px">This invite expires ${expirationMinutes >= 1440 ? `in ${Math.ceil(expirationMinutes / 1440)} day${Math.ceil(expirationMinutes / 1440) === 1 ? "" : "s"}` : `in ${expirationMinutes} minutes`}. If you were not expecting it, you can ignore this email.</p>
       </div>`,
   };
 }
