@@ -3,8 +3,8 @@ import {
   familyInviteEmail,
   sendDaysieEmail,
 } from "./auth.js";
+import { handlePowerRequest } from "./power-worker.js";
 
-let e = !1;
 export default {
   async fetch(e, E, executionContext) {
     const p = new URL(e.url).pathname,
@@ -34,6 +34,9 @@ export default {
           const turnstileToken = String(payload.turnstileToken || "");
           if (!turnstileToken)
             return c({ error: "Complete the security check" }, 400, m);
+          const authIp = e.headers.get("CF-Connecting-IP") || "unknown";
+          if (!(await u(E, `auth:${authIp}`, 20, 15 * 60 * 1000)))
+            return c({ error: "Too many sign-in attempts. Try again later." }, 429, m);
           const verification = await verifyTurnstileToken(E, turnstileToken);
           if (!verification.success) {
             console.warn("Turnstile rejected an authentication request", {
@@ -55,13 +58,31 @@ export default {
         ).handler(authRequest);
         const headers = new Headers(response.headers);
         Object.entries(m).forEach(([name, value]) => headers.set(name, value));
+        if (response.ok && executionContext) {
+          const auditResponse = response.clone();
+          executionContext.waitUntil(
+            auditResponse
+              .json()
+              .then((data) => {
+                const userId = data?.user?.id || data?.data?.user?.id;
+                if (!userId || data?.twoFactorRedirect) return;
+                const event = p.includes("sign-up")
+                  ? "account-created"
+                  : p.includes("two-factor")
+                    ? "two-factor-sign-in"
+                    : "signed-in";
+                return recordSecurityEvent(E, userId, event, e);
+              })
+              .catch(() => {}),
+          );
+        }
         return new Response(response.body, {
           status: response.status,
           statusText: response.statusText,
           headers,
         });
       }
-      if ((await i(E), "/health" === p && "GET" === e.method)) {
+      if ("/health" === p && "GET" === e.method) {
         let r = !1;
         try {
           (await E.DB.prepare("SELECT 1 AS ok").first(), (r = !0));
@@ -296,8 +317,10 @@ export default {
         const t = await e.json();
         const baseRevision = Number(t._baseRevision || 0);
         const force = t._force === true;
+        const syncSource = d(t._source, 80) || "Daysie device";
         delete t._baseRevision;
         delete t._force;
+        delete t._source;
         delete t._sync;
         const a = JSON.stringify(t);
         if (a.length > 1e6) return c({ error: "Data too large to sync" }, 413, m);
@@ -305,9 +328,15 @@ export default {
           "SELECT data, revision, updated_at FROM user_data WHERE user_id = ?",
         ).bind(i).first();
         if (!current) {
-          await E.DB.prepare(
-            "INSERT INTO user_data (user_id, data, updated_at, revision) VALUES (?, ?, ?, 1)",
-          ).bind(i, a, Date.now()).run();
+          const now = Date.now();
+          await E.DB.batch([
+            E.DB.prepare(
+              "INSERT INTO user_data (user_id, data, updated_at, revision) VALUES (?, ?, ?, 1)",
+            ).bind(i, a, now),
+            E.DB.prepare(
+              "INSERT INTO user_data_versions (id, user_id, revision, data, source, created_at) VALUES (?, ?, 1, ?, ?, ?)",
+            ).bind(crypto.randomUUID(), i, a, syncSource, now),
+          ]);
           return c({ success: true, revision: 1 }, 200, m);
         }
         if (!force && Number(current.revision || 0) !== baseRevision)
@@ -319,9 +348,25 @@ export default {
             cloud: JSON.parse(current.data),
           }, 409, m);
         const nextRevision = Number(current.revision || 0) + 1;
+        const now = Date.now();
+        await E.DB.batch([
+          E.DB.prepare(
+            "UPDATE user_data SET data = ?, updated_at = ?, revision = ? WHERE user_id = ?",
+          ).bind(a, now, nextRevision, i),
+          E.DB.prepare(
+            "INSERT INTO user_data_versions (id, user_id, revision, data, source, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+          ).bind(
+            crypto.randomUUID(),
+            i,
+            nextRevision,
+            a,
+            syncSource,
+            now,
+          ),
+        ]);
         await E.DB.prepare(
-          "UPDATE user_data SET data = ?, updated_at = ?, revision = ? WHERE user_id = ?",
-        ).bind(a, Date.now(), nextRevision, i).run();
+          "DELETE FROM user_data_versions WHERE user_id = ? AND id NOT IN (SELECT id FROM user_data_versions WHERE user_id = ? ORDER BY revision DESC LIMIT 20)",
+        ).bind(i, i).run();
         return c({ success: true, revision: nextRevision }, 200, m);
       }
       if ("/account/sessions" === p && "GET" === e.method) {
@@ -471,6 +516,11 @@ export default {
           E.DB.prepare("DELETE FROM recovery_codes WHERE user_id = ?").bind(userId),
           E.DB.prepare("DELETE FROM notification_preferences WHERE user_id = ?").bind(userId),
           E.DB.prepare("DELETE FROM encrypted_backups WHERE user_id = ?").bind(userId),
+          E.DB.prepare("DELETE FROM user_data_versions WHERE user_id = ?").bind(userId),
+          E.DB.prepare("DELETE FROM security_events WHERE user_id = ?").bind(userId),
+          E.DB.prepare("DELETE FROM family_comments WHERE user_id = ?").bind(userId),
+          E.DB.prepare("DELETE FROM performance_metrics WHERE user_id = ?").bind(userId),
+          E.DB.prepare("DELETE FROM family_events WHERE creator_user_id = ?").bind(userId),
           E.DB.prepare("DELETE FROM device_labels WHERE user_id = ?").bind(userId),
           E.DB.prepare("DELETE FROM family_invites WHERE inviter_user_id = ?").bind(userId),
           E.DB.prepare("DELETE FROM assigned_items WHERE from_user = ? OR to_user = ?").bind(userId, userId),
@@ -675,8 +725,9 @@ export default {
         const invite = await E.DB.prepare("SELECT i.*, m.name FROM family_invites i LEFT JOIN family_members m ON m.user_id = i.inviter_user_id WHERE i.code = ? AND i.inviter_user_id = ?").bind(code, userId).first();
         if (!invite) return c({ error: "Invite not found" }, 404, m);
         if (!invite.invited_email) return c({ error: "This code-only invite has no email address" }, 400, m);
-        const expires = Date.now() + 15 * 60 * 1000;
-        await sendDaysieEmail(E, { to: invite.invited_email, ...familyInviteEmail({ appUrl: String(E.APP_URL || "https://daysie.pages.dev").replace(/\/$/, ""), code, inviterName: invite.name || "A family member", inviteeEmail: invite.invited_email }) });
+        const expirationMinutes = Math.max(15, Math.min(10080, Math.round((invite.expires - invite.created) / 60000) || 1440));
+        const expires = Date.now() + expirationMinutes * 60 * 1000;
+        await sendDaysieEmail(E, { to: invite.invited_email, ...familyInviteEmail({ appUrl: String(E.APP_URL || "https://daysie.pages.dev").replace(/\/$/, ""), code, inviterName: invite.name || "A family member", inviteeEmail: invite.invited_email, expirationMinutes }) });
         await E.DB.prepare("UPDATE family_invites SET expires = ? WHERE code = ?").bind(expires, code).run();
         await logFamilyActivity(E, invite.family_id, userId, "invite-resent", { email: invite.invited_email });
         return c({ success: true, expires }, 200, m);
@@ -710,6 +761,15 @@ export default {
           !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(inviteEmail)
         )
           return c({ error: "Enter a valid email address" }, 400, m);
+        if (inviteEmail) {
+          const existing = await E.DB.prepare(
+            `SELECT u.id, fm.family_id FROM "user" u LEFT JOIN family_members fm ON fm.user_id = u.id WHERE lower(u.email) = ?`,
+          ).bind(inviteEmail).first();
+          if (existing?.id === i)
+            return c({ error: "Use another email address—you are already signed in with this one." }, 400, m);
+          if (existing?.family_id === n)
+            return c({ error: "That person is already in your family." }, 409, m);
+        }
         if (inviteEmail && !(await u(E, `finvite:${i}`, 8, 36e5)))
           return c(
             { error: "Too many invitations. Please wait before trying again." },
@@ -731,11 +791,15 @@ export default {
           )
             break;
         }
-        const d = Date.now() + 9e5;
+        const expirationMinutes = Math.max(
+          15,
+          Math.min(10080, Number(a.expiresMinutes || 1440)),
+        );
+        const expiresAt = Date.now() + expirationMinutes * 60 * 1000;
         await E.DB.prepare(
           "INSERT INTO family_invites (code, family_id, created, expires, invited_email, inviter_user_id) VALUES (?, ?, ?, ?, ?, ?)",
         )
-          .bind(s, n, Date.now(), d, inviteEmail || null, i)
+          .bind(s, n, Date.now(), expiresAt, inviteEmail || null, i)
           .run();
         let emailSent = !1,
           emailError = null;
@@ -751,6 +815,7 @@ export default {
                 code: s,
                 inviterName: d(a.name, 40) || "A family member",
                 inviteeEmail: inviteEmail,
+                expirationMinutes,
               }),
             });
             emailSent = !0;
@@ -762,7 +827,7 @@ export default {
         return c(
           {
             code: s,
-            expires: d,
+            expires: expiresAt,
             emailSent,
             emailError,
             invitedEmail: inviteEmail || null,
@@ -1213,6 +1278,15 @@ export default {
           c({ success: !0 }, 200, m)
         );
       }
+      if (p.startsWith("/features/")) {
+        const userId = await r(e, E);
+        return await handlePowerRequest({
+          request: e,
+          env: E,
+          userId,
+          corsHeaders: m,
+        });
+      }
       return c({ error: "Not found" }, 404, m);
     } catch (e) {
       return (
@@ -1223,7 +1297,6 @@ export default {
   },
   async scheduled(e, r, t) {
     try {
-      await i(r);
       const e = Date.now(),
         t = await r.DB.prepare("SELECT user_id, data FROM user_data").all();
       for (const { user_id: i, data: a } of t.results) {
@@ -1315,7 +1388,6 @@ async function r(e, r) {
   }
 }
 async function i(r) {
-  if (e) return;
   await r.DB.batch([
     r.DB.prepare(
       "CREATE TABLE IF NOT EXISTS family_members (family_id TEXT, user_id TEXT PRIMARY KEY, name TEXT, emoji TEXT, color TEXT, joined INTEGER)",
@@ -1338,6 +1410,11 @@ async function i(r) {
     r.DB.prepare("CREATE TABLE IF NOT EXISTS family_activity (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, user_id TEXT NOT NULL, action TEXT NOT NULL, details TEXT, created_at INTEGER NOT NULL)"),
     r.DB.prepare("CREATE TABLE IF NOT EXISTS notification_preferences (user_id TEXT PRIMARY KEY, quiet_start TEXT, quiet_end TEXT, timezone TEXT NOT NULL DEFAULT 'UTC', categories TEXT NOT NULL DEFAULT '{\"reminders\":true,\"family\":true,\"lists\":true}', updated_at INTEGER NOT NULL)"),
     r.DB.prepare("CREATE TABLE IF NOT EXISTS encrypted_backups (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, envelope TEXT NOT NULL, size INTEGER NOT NULL, created_at INTEGER NOT NULL)"),
+    r.DB.prepare("CREATE TABLE IF NOT EXISTS user_data_versions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, revision INTEGER NOT NULL, data TEXT NOT NULL, source TEXT, created_at INTEGER NOT NULL)"),
+    r.DB.prepare("CREATE TABLE IF NOT EXISTS security_events (id TEXT PRIMARY KEY, user_id TEXT, event TEXT NOT NULL, details TEXT, ip TEXT, user_agent TEXT, created_at INTEGER NOT NULL)"),
+    r.DB.prepare("CREATE TABLE IF NOT EXISTS family_events (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, creator_user_id TEXT NOT NULL, title TEXT NOT NULL, note TEXT, starts_at INTEGER NOT NULL, ends_at INTEGER, all_day INTEGER NOT NULL DEFAULT 0, recurrence TEXT NOT NULL DEFAULT 'none', color TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)"),
+    r.DB.prepare("CREATE TABLE IF NOT EXISTS family_comments (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, item_id TEXT NOT NULL, user_id TEXT NOT NULL, body TEXT, reaction TEXT, created_at INTEGER NOT NULL)"),
+    r.DB.prepare("CREATE TABLE IF NOT EXISTS performance_metrics (id TEXT PRIMARY KEY, user_id TEXT, metric TEXT NOT NULL, value REAL NOT NULL, rating TEXT, path TEXT, created_at INTEGER NOT NULL)"),
   ]);
   try {
     await r.DB.prepare(
@@ -1362,7 +1439,32 @@ async function i(r) {
   try {
     await r.DB.prepare("ALTER TABLE user_data ADD COLUMN revision INTEGER NOT NULL DEFAULT 0").run();
   } catch (r) {}
-  e = !0;
+  try {
+    await r.DB.prepare("ALTER TABLE family_members ADD COLUMN availability TEXT DEFAULT 'free'").run();
+  } catch (r) {}
+  try {
+    await r.DB.prepare("ALTER TABLE family_members ADD COLUMN availability_until INTEGER").run();
+  } catch (r) {}
+}
+
+async function recordSecurityEvent(env, userId, event, request, details = null) {
+  try {
+    await env.DB.prepare(
+      "INSERT INTO security_events (id, user_id, event, details, ip, user_agent, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+      .bind(
+        crypto.randomUUID(),
+        userId,
+        event,
+        details ? JSON.stringify(details) : null,
+        request.headers.get("CF-Connecting-IP"),
+        request.headers.get("User-Agent"),
+        Date.now(),
+      )
+      .run();
+  } catch (error) {
+    console.error("Security event audit failed", error);
+  }
 }
 
 function friendlyDeviceName(userAgent = "") {

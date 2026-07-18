@@ -60,12 +60,26 @@ Daysie is a beautiful, accessible reminder and journal app designed for **people
 ### ☁️ **Sync Across Devices** (Optional)
 - **Secure accounts** — Create an account with a name, unique username, email, and password; sign in with email or username
 - **Bot protection** — Cloudflare Turnstile protects sign-up and sign-in
+- **Two-step verification** — Authenticator-app codes, trusted devices, backup codes, and lockout protection
+- **Passkey management** — Add, rename, review, and remove Face ID, Touch ID, and device-PIN passkeys
+- **Sync history** — Automatic cross-device merging plus 20 restorable cloud versions
 - **Device pairing** — Link another device with a short code and an approve tap
-- **Family invitations** — Invite relatives by email or share the existing short code
+- **Family invitations** — Invite by email, short code, QR code, or the native share sheet with configurable expiration
 - **Cloud sync** — Your data syncs across all your devices (powered by Cloudflare D1)
 - **Real push notifications** — Get reminders even when the app is closed (when deployed with Cloudflare Worker)
 - **Privacy-first** — Synced data is access-controlled and scoped to your account; optional backup history is encrypted on your device before upload
 - **Works offline** — Local-first design means the app works without an account or internet
+
+### 🏡 **Household Planning**
+- **Family dashboard and calendar** — See availability, upcoming events, assignments, and shared-list progress
+- **Task discussions** — Add family comments and quick reactions without introducing family roles
+- **Natural-language quick add** — Preview dates, assignees, importance, weekdays, and every-two-week schedules
+- **Smart grocery lists** — Parse quantity, unit, category, estimated price, and store from one line
+- **Reusable routines** — Save household checklists and turn them into scheduled reminders
+- **Search everything** — Find tasks, journal entries, lists, routines, and family events with <kbd>Ctrl/⌘ K</kbd>
+- **Recently deleted** — Restore tasks, entries, and lists for 30 days with immediate Undo
+- **Safer imports** — Preview, merge, or replace a JSON backup before applying it
+- **Storage dashboard** — Review local data, photos, backups, sync history, and family records
 
 ## 🚀 Quick Start
 
@@ -123,10 +137,12 @@ daysie/
 ├── index.html          # Main app HTML
 ├── styles.css          # All styles (light/dark/high-contrast themes)
 ├── app.js              # App logic (tasks, journal, profiles, sync)
+├── power-features.js   # Search, routines, trash, family dashboard, security UI
 ├── sw.js               # Service Worker (offline cache + push listener)
 ├── favicon.svg         # Daisy icon
 ├── site.webmanifest    # PWA manifest
 ├── worker.js           # Cloudflare Worker (auth + sync + scheduled push)
+├── power-worker.js     # Focused account, history, family, storage, and metrics API
 ├── schema.sql          # D1 database schema
 ├── wrangler.toml       # Worker configuration
 ├── DEPLOYMENT.md       # Cloud setup guide

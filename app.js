@@ -88,6 +88,8 @@ let db = {
     ],
     onboarded: !1,
     lists: [],
+    routines: [],
+    trash: [],
     tourDone: !1,
   },
   settings = {
@@ -120,8 +122,9 @@ let db = {
   calendarDate = new Date(),
   taskFilter = "all",
   renagTimer = null,
-  assignee = null;
-const APP_VERSION = "2026.07.17-24";
+  assignee = null,
+  pendingImport = null;
+const APP_VERSION = "2026.07.18-20";
 let swRegistration = null,
   updateBannerShown = !1;
 const save = () => {
@@ -175,6 +178,9 @@ const save = () => {
       e && db.profiles.find((t) => t.id === e) && (activeProfileId = e);
     } catch (e) {}
     (Array.isArray(db.lists) || (db.lists = []),
+      Array.isArray(db.routines) || (db.routines = []),
+      Array.isArray(db.trash) || (db.trash = []),
+      (db.trash = db.trash.filter((item) => Date.now() - Number(item.deletedAt || 0) < 30 * 86400000)),
       "boolean" != typeof db.tourDone && (db.tourDone = !1),
       (db.profiles || []).forEach((e) => {
         Array.isArray(e.habits) || (e.habits = []);
@@ -594,7 +600,12 @@ function renderSubtaskEdit() {
 function nextDue(e, t) {
   const o = new Date(e);
   if ("daily" === t) o.setDate(o.getDate() + 1);
+  else if ("weekdays" === t) {
+    do o.setDate(o.getDate() + 1);
+    while (o.getDay() === 0 || o.getDay() === 6);
+  }
   else if ("weekly" === t) o.setDate(o.getDate() + 7);
+  else if ("biweekly" === t) o.setDate(o.getDate() + 14);
   else if ("monthly" === t) {
     const n = o.getDate();
     (o.setDate(1),
@@ -635,18 +646,58 @@ function completeTask(e) {
   }
   (save(), renderAll());
 }
+function restoreTrashItem(item) {
+  if (!item?.value) return;
+  if (item.type === "task") {
+    const profile = db.profiles.find((profile) => profile.id === item.context?.profileId) || getProfile();
+    if (!profile.tasks.some((task) => task.id === item.value.id)) profile.tasks.push(item.value);
+  } else if (item.type === "entry") {
+    const profile = db.profiles.find((profile) => profile.id === item.context?.profileId) || getProfile();
+    if (!profile.entries.some((entry) => entry.id === item.value.id)) profile.entries.push(item.value);
+  } else if (item.type === "list") {
+    const existing = db.lists.find((list) => list.id === item.value.id);
+    if (existing) Object.assign(existing, item.value, { deleted: false, updatedAt: Date.now() });
+    else db.lists.push({ ...item.value, deleted: false, updatedAt: Date.now() });
+    if (typeof syncSharedLists === "function") syncSharedLists("restored a shared list");
+  }
+  db.trash = db.trash.filter((candidate) => candidate.id !== item.id);
+  save();
+  renderAll();
+  window.dispatchEvent(new CustomEvent("daysie:trash-changed"));
+}
+function moveToTrash(type, value, context = {}) {
+  db.trash ||= [];
+  const item = { id: id(), type, value: structuredClone(value), context, deletedAt: Date.now() };
+  db.trash.unshift(item);
+  window.__daysieLastTrashItem = item;
+  window.dispatchEvent(new CustomEvent("daysie:trash-changed"));
+  return item;
+}
+function showUndo(message) {
+  document.querySelector(".undo-banner")?.remove();
+  const item = window.__daysieLastTrashItem;
+  const banner = document.createElement("div");
+  banner.className = "undo-banner";
+  banner.setAttribute("role", "status");
+  banner.innerHTML = `<span>${esc(message)}</span><button type="button">Undo</button>`;
+  banner.querySelector("button").onclick = () => { restoreTrashItem(item); banner.remove(); toast("Restored", "Your item is back."); };
+  document.body.append(banner);
+  setTimeout(() => banner.remove(), 8000);
+}
 function delTask(e) {
   confirm(
     "🗑️",
     "Delete reminder?",
-    "This cannot be undone.",
+    "It will stay in Recently deleted for 30 days.",
     () => {
       const t = findTaskOwner(e),
         o = t ? t.profile : getProfile();
-      ((o.tasks = o.tasks.filter((t) => t.id !== e)),
+      const deleted = o.tasks.find((t) => t.id === e);
+      (deleted && moveToTrash("task", deleted, { profileId: o.id }),
+        (o.tasks = o.tasks.filter((t) => t.id !== e)),
         save(),
         renderAll(),
-        toast("Deleted", ""));
+        showUndo("Reminder moved to trash"));
     },
     () => {},
   );
@@ -833,7 +884,7 @@ function renderOnThisDay() {
         .map((e) => {
           const t = new Date(e.ts),
             o = moods.find((t) => +t[0] === e.mood);
-          return `<article class="entry">\n      <div class="entry-head">\n        <span class="face">${o ? o[1] : "📝"}</span>\n        <div><b>${t.getFullYear()}</b><br><small>${o ? o[2] : ""}</small></div>\n      </div>\n      ${e.text ? `<p class="entry-text">${esc(e.text)}</p>` : ""}\n      ${e.photos && e.photos.length ? `<div class="entry-photos">${e.photos.map((e, t) => `<img src="${safePhotoSrc(e)}" class="entry-photo" tabindex="0" alt="Memory photo ${t + 1}" />`).join("")}</div>` : ""}\n    </article>`;
+          return `<article class="entry">\n      <div class="entry-head">\n        <span class="face">${o ? o[1] : "📝"}</span>\n        <div><b>${t.getFullYear()}</b><br><small>${o ? o[2] : ""}</small></div>\n      </div>\n      ${e.text ? `<p class="entry-text">${esc(e.text)}</p>` : ""}\n      ${e.photos && e.photos.length ? `<div class="entry-photos">${e.photos.map((e, t) => `<img src="${safePhotoSrc(e)}" class="entry-photo" loading="lazy" decoding="async" tabindex="0" alt="Memory photo ${t + 1}" />`).join("")}</div>` : ""}\n    </article>`;
         })
         .join("")))
     : $("#onThisDaySection").classList.add("hidden");
@@ -863,7 +914,7 @@ function renderCalendar() {
         (e) => day(new Date(e.ts)) === s && e.photos && e.photos.length,
       ),
       c = d
-        ? `<img class="cal-thumb" src="${safePhotoSrc(d.photos[0])}" alt="" />`
+        ? `<img class="cal-thumb" src="${safePhotoSrc(d.photos[0])}" loading="lazy" decoding="async" alt="" />`
         : "";
     i += `<div class="cal-day ${r ? "today" : ""} ${l ? "has-tasks" : ""} ${c ? "has-photo" : ""}" data-date="${s}">${c}<span class="cal-num">${n}</span></div>`;
   }
@@ -892,7 +943,7 @@ function renderCalendar() {
             .flatMap((e) => e.photos)
             .map(
               (e, t) =>
-                `<img src="${safePhotoSrc(e)}" class="entry-photo" tabindex="0" alt="Memory ${t + 1}" />`,
+                `<img src="${safePhotoSrc(e)}" class="entry-photo" loading="lazy" decoding="async" tabindex="0" alt="Memory ${t + 1}" />`,
             )
             .join("")}</div>`;
         }
@@ -944,7 +995,7 @@ function renderEntries() {
         .map((e) => {
           const t = moods.find((t) => +t[0] === e.mood),
             o = new Date(e.ts);
-          return `<article class="entry">\n        <div class="entry-head">\n          <span class="face">${t ? t[1] : "📝"}</span>\n          <div><b>${o.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}</b><br><small>${o.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}${t ? " · " + t[2] : ""}</small></div>\n          <button class="icon" data-edit-entry="${safeDomId(e.id)}">✏️</button>\n          <button class="icon" data-delete-entry="${safeDomId(e.id)}">🗑️</button>\n        </div>\n        ${e.text ? `<p class="entry-text">${esc(e.text)}</p>` : ""}\n        ${e.photos && e.photos.length ? `<div class="entry-photos">${e.photos.map((e, t) => `<img src="${safePhotoSrc(e)}" class="entry-photo" tabindex="0" alt="Journal photo ${t + 1}" />`).join("")}</div>` : ""}\n        <div class="tags">${(e.tags || []).map((e) => `<span>${esc(e)}</span>`).join("")}</div>\n      </article>`;
+          return `<article class="entry">\n        <div class="entry-head">\n          <span class="face">${t ? t[1] : "📝"}</span>\n          <div><b>${o.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}</b><br><small>${o.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}${t ? " · " + t[2] : ""}</small></div>\n          <button class="icon" data-edit-entry="${safeDomId(e.id)}" aria-label="Edit journal entry">✏️</button>\n          <button class="icon" data-delete-entry="${safeDomId(e.id)}" aria-label="Delete journal entry">🗑️</button>\n        </div>\n        ${e.text ? `<p class="entry-text">${esc(e.text)}</p>` : ""}\n        ${e.photos && e.photos.length ? `<div class="entry-photos">${e.photos.map((e, t) => `<img src="${safePhotoSrc(e)}" class="entry-photo" loading="lazy" decoding="async" tabindex="0" alt="Journal photo ${t + 1}" />`).join("")}</div>` : ""}\n        <div class="tags">${(e.tags || []).map((e) => `<span>${esc(e)}</span>`).join("")}</div>\n      </article>`;
         })
         .join("")
     : empty("📖", "Your journal awaits", "Write your first entry above.")),
@@ -953,14 +1004,18 @@ function renderEntries() {
         confirm(
           "🗑️",
           "Delete entry?",
-          "This cannot be undone.",
+          "It will stay in Recently deleted for 30 days.",
           () => {
-            ((e.entries = e.entries.filter(
+            const deleted = e.entries.find(
+              (entry) => entry.id === t.dataset.deleteEntry,
+            );
+            (deleted && moveToTrash("entry", deleted, { profileId: e.id }),
+              (e.entries = e.entries.filter(
               (e) => e.id !== t.dataset.deleteEntry,
             )),
               save(),
               renderEntries(),
-              toast("Deleted", ""));
+              showUndo("Journal entry moved to trash"));
           },
           () => {},
         );
@@ -1474,26 +1529,15 @@ function confetti() {
     const t = e.target.files && e.target.files[0];
     if (!t) return;
     try {
-      const e = normalizeImport(JSON.parse(await t.text()));
-      confirm(
-        "⬆️",
-        "Import this backup?",
-        "This replaces the data on this device. Your current cloud account stays connected.",
-        () => {
-          ((db = e),
-            (activeProfileId = db.profiles[0].id),
-            saveActiveProfile(),
-            save(),
-            renderAll(),
-            "function" == typeof clearFamilyLocal && clearFamilyLocal(),
-            "function" == typeof familyBoot && familyBoot(),
-            toast(
-              "✅ Backup imported",
-              "Daysie has refreshed your local data.",
-            ));
-        },
-        () => {},
-      );
+      pendingImport = normalizeImport(JSON.parse(await t.text()));
+      const counts = {
+        Reminders: pendingImport.profiles.reduce((sum, profile) => sum + profile.tasks.length, 0),
+        Journal: pendingImport.profiles.reduce((sum, profile) => sum + profile.entries.length, 0),
+        Habits: pendingImport.profiles.reduce((sum, profile) => sum + profile.habits.length, 0),
+        Lists: pendingImport.lists.length,
+      };
+      $("#importPreviewSummary").innerHTML = Object.entries(counts).map(([label, value]) => `<div class="storage-stat"><b>${value}</b><small>${label}</small></div>`).join("");
+      $("#importPreviewDialog").showModal();
     } catch (e) {
       toast("❌ Import failed", "Choose a valid Daysie JSON backup.");
     } finally {
@@ -1638,6 +1682,8 @@ function normalizeImport(e) {
     profiles: t,
     onboarded: !0,
     lists: Array.isArray(e.lists) ? e.lists : [],
+    routines: Array.isArray(e.routines) ? e.routines : [],
+    trash: Array.isArray(e.trash) ? e.trash : [],
     tourDone: !!e.tourDone,
   };
 }
@@ -1675,6 +1721,59 @@ function mergeLocalPhotos(e) {
     e
   );
 }
+function mergeRecords(local = [], cloud = []) {
+  const records = new Map();
+  [...cloud, ...local].forEach((record) => {
+    if (!record?.id) return;
+    const existing = records.get(record.id);
+    const timestamp = Number(record.updatedAt || record.completed || record.ts || record.created || 0);
+    const existingTimestamp = Number(existing?.updatedAt || existing?.completed || existing?.ts || existing?.created || 0);
+    if (!existing || timestamp >= existingTimestamp) records.set(record.id, { ...existing, ...record });
+  });
+  return [...records.values()];
+}
+function mergeCloudPayload(local, cloud) {
+  const localProfiles = local.profiles || [];
+  const cloudProfiles = cloud.profiles || [];
+  const profileIds = new Set([...localProfiles, ...cloudProfiles].map((profile) => profile.id));
+  const profiles = [...profileIds].map((profileId) => {
+    const left = localProfiles.find((profile) => profile.id === profileId) || {};
+    const right = cloudProfiles.find((profile) => profile.id === profileId) || {};
+    return {
+      ...right,
+      ...left,
+      id: profileId,
+      tasks: mergeRecords(left.tasks, right.tasks),
+      entries: mergeRecords(left.entries, right.entries),
+      habits: mergeRecords(left.habits, right.habits),
+    };
+  });
+  return {
+    ...cloud,
+    ...local,
+    profiles,
+    lists: mergeRecords(local.lists, cloud.lists),
+    routines: mergeRecords(local.routines, cloud.routines),
+    trash: mergeRecords(local.trash, cloud.trash),
+    tourDone: Boolean(local.tourDone || cloud.tourDone),
+  };
+}
+async function compressPhotoBlob(blob) {
+  if (!blob?.type?.startsWith("image/") || blob.size < 450000) return blob;
+  try {
+    const bitmap = await createImageBitmap(blob);
+    const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    canvas.getContext("2d", { alpha: false }).drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close?.();
+    const compressed = await new Promise((resolve) => canvas.toBlob(resolve, "image/webp", 0.82));
+    return compressed && compressed.size < blob.size ? compressed : blob;
+  } catch {
+    return blob;
+  }
+}
 async function uploadPhotosToR2(e) {
   if (!e || !e.length) return e || [];
   if (!settings.authToken) return e;
@@ -1682,7 +1781,8 @@ async function uploadPhotosToR2(e) {
   for (const o of e)
     if (String(o).startsWith("data:"))
       try {
-        const e = await (await fetch(o)).blob(),
+        const original = await (await fetch(o)).blob(),
+          e = await compressPhotoBlob(original),
           n = await fetch(`${API}/photo`, {
             method: "POST",
             headers: {
@@ -1738,9 +1838,12 @@ async function syncToCloud(force = false) {
         body: JSON.stringify({
           profiles: stripPhotosForSync(db.profiles),
           lists: db.lists || [],
+          routines: db.routines || [],
+          trash: db.trash || [],
           tourDone: !!db.tourDone,
           _baseRevision: Number(settings.syncRevision || 0),
           _force: force,
+          _source: `${navigator.platform || "Device"} · ${navigator.userAgentData?.brands?.[0]?.brand || "Browser"}`,
         }),
       });
       const result = await response.json().catch(() => ({}));
@@ -1749,14 +1852,18 @@ async function syncToCloud(force = false) {
         settings.syncPending = true;
         saveSettings();
         updateSyncStatus();
-        const keepDevice = confirm("Daysie found newer changes from another device. Choose OK to keep this device's version, or Cancel to use the cloud version.");
-        if (keepDevice) {
-          settings.syncRevision = result.revision;
-          saveSettings();
-          setTimeout(() => syncToCloud(true), 0);
-          return;
-        }
-        applyCloudPayload({ ...result.cloud, _sync: { revision: result.revision, updatedAt: result.updatedAt } });
+        const merged = mergeCloudPayload(db, result.cloud || {});
+        db.profiles = merged.profiles;
+        db.lists = merged.lists;
+        db.routines = merged.routines;
+        db.trash = merged.trash;
+        db.tourDone = merged.tourDone;
+        settings.syncRevision = result.revision;
+        localStorage.setItem(KEY, JSON.stringify(db));
+        saveSettings();
+        renderAll();
+        toast("Changes merged", "Daysie combined updates from this device and the cloud. You can undo from Sync history.");
+        setTimeout(() => syncToCloud(true), 0);
         return;
       }
       if (!response.ok) throw new Error(result.error || "Sync failed");
@@ -1783,6 +1890,8 @@ function applyCloudPayload(payload) {
   if (!payload.lists || (window.family && window.family.familyId)) {
     // Family lists are synced by the family endpoint.
   } else db.lists = payload.lists;
+  if (Array.isArray(payload.routines)) db.routines = payload.routines;
+  if (Array.isArray(payload.trash)) db.trash = payload.trash;
   if (typeof payload.tourDone === "boolean") db.tourDone = db.tourDone || payload.tourDone;
   if (payload.profiles?.length) {
     db.profiles = mergeLocalPhotos(payload.profiles);
