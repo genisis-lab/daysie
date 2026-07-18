@@ -142,15 +142,82 @@
 
   async function loadNotificationPreferences() {
     if (!settings.authToken) return;
-    try { const prefs = await request("/notification-preferences"); byId("notifyReminders").checked = prefs.categories.reminders; byId("notifyFamily").checked = prefs.categories.family; byId("notifyLists").checked = prefs.categories.lists; byId("quietStart").value = prefs.quietStart || "22:00"; byId("quietEnd").value = prefs.quietEnd || "07:00"; } catch (error) { console.error(error); }
+    try {
+      const prefs = await request("/notification-preferences");
+      byId("notifyReminders").checked = prefs.categories.reminders;
+      byId("notifyFamily").checked = prefs.categories.family;
+      byId("notifyLists").checked = prefs.categories.lists;
+      byId("quietStart").value = prefs.quietStart || "22:00";
+      byId("quietEnd").value = prefs.quietEnd || "07:00";
+      byId("notificationTone").value = prefs.tone || "system";
+      byId("notificationVibration").value = prefs.vibration || "system";
+      settings.notificationTone = prefs.tone || "system";
+      settings.notificationVibration = prefs.vibration || "system";
+      saveSettings();
+    } catch (error) { console.error(error); }
     byId("timezoneLabel").textContent = `Timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}`;
+    const appleMobile = /iPhone|iPad|iPod/.test(navigator.userAgent);
+    const vibrationSupported = "vibrate" in navigator;
+    byId("notificationPlatformNote").textContent = appleMobile
+      ? "On iPhone and iPad, iOS controls the background notification sound and vibration. Your chosen Daysie tone plays while the app is open."
+      : vibrationSupported
+        ? "Custom tones play while Daysie is open. Background notifications use your system sound; vibration patterns are requested where supported."
+        : "Custom tones play while Daysie is open. Background sound and vibration are controlled by your operating system.";
   }
-  byId("saveNotificationPrefsBtn")?.addEventListener("click", async () => { try { await request("/notification-preferences", { method: "PUT", body: JSON.stringify({ quietStart: byId("quietStart").value, quietEnd: byId("quietEnd").value, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, categories: { reminders: byId("notifyReminders").checked, family: byId("notifyFamily").checked, lists: byId("notifyLists").checked } }) }); toast("Preferences saved", "Notification choices apply across your account."); } catch (error) { toast("Could not save", error.message); } });
+  byId("saveNotificationPrefsBtn")?.addEventListener("click", async () => {
+    try {
+      const tone = byId("notificationTone").value;
+      const vibration = byId("notificationVibration").value;
+      await request("/notification-preferences", { method: "PUT", body: JSON.stringify({ quietStart: byId("quietStart").value, quietEnd: byId("quietEnd").value, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, tone, vibration, categories: { reminders: byId("notifyReminders").checked, family: byId("notifyFamily").checked, lists: byId("notifyLists").checked } }) });
+      settings.notificationTone = tone;
+      settings.notificationVibration = vibration;
+      saveSettings();
+      toast("Preferences saved", "Notification choices apply across your account.");
+    } catch (error) { toast("Could not save", error.message); }
+  });
+
+  const deliveryText = (device) => {
+    if (device.lastSuccessAt) return `Last delivered ${new Date(device.lastSuccessAt).toLocaleString()}`;
+    if (device.lastFailureAt) return `Last attempt failed${device.lastStatus ? ` · status ${device.lastStatus}` : ""}`;
+    return "Connected · waiting for its first delivery";
+  };
+  async function loadPushStatus() {
+    if (!settings.authToken) return;
+    const list = byId("notificationDeviceList");
+    try {
+      const status = await request("/push/status");
+      list.innerHTML = status.devices.length
+        ? status.devices.map((device) => `<div class="notification-device-status"><span>${device.lastSuccessAt ? "✅" : device.lastFailureAt ? "⚠️" : "🔔"}</span><b>${safe(device.name)}</b><small>${safe(deliveryText(device))}</small></div>`).join("")
+        : "<small>No devices are connected for closed-app notifications yet.</small>";
+    } catch (error) { list.innerHTML = `<small>${safe(error.message)}</small>`; }
+  }
+  byId("previewNotificationToneBtn")?.addEventListener("click", () => {
+    settings.notificationTone = byId("notificationTone").value;
+    settings.notificationVibration = byId("notificationVibration").value;
+    playNotificationTone(settings.notificationTone);
+    vibrateReminder(settings.notificationVibration);
+  });
+  byId("sendTestNotificationBtn")?.addEventListener("click", async () => {
+    const button = byId("sendTestNotificationBtn");
+    button.disabled = true;
+    try {
+      if (!("Notification" in window)) throw new Error("Notifications are not supported in this browser.");
+      if (isIOS() && !isStandalone()) throw new Error('On iPhone or iPad, add Daysie to your Home Screen, open it there, then enable notifications.');
+      if (Notification.permission !== "granted") await enableNotifications();
+      if (Notification.permission !== "granted") throw new Error("Allow notifications first, then try again.");
+      await refreshPushSubscription();
+      const result = await request("/push/test", { method: "POST", body: "{}" });
+      toast("Test sent", `Delivered to ${result.sent} of ${result.attempted} connected device${result.attempted === 1 ? "" : "s"}.`);
+      await loadPushStatus();
+    } catch (error) { toast("Test notification failed", error.message); }
+    finally { button.disabled = false; }
+  });
 
   async function refreshHealth() {
     const list = byId("pwaHealthList"); if (!list) return;
-    const checks = [{ label: "Online", ok: navigator.onLine }, { label: "Offline app", ok: "serviceWorker" in navigator && Boolean(await navigator.serviceWorker.getRegistration()) }, { label: "Notifications", ok: Notification.permission === "granted", detail: Notification.permission }, { label: "Installed", ok: matchMedia("(display-mode: standalone)").matches || navigator.standalone === true }];
-    try { const health = await (await fetch(`${API}/health`)).json(); checks.push({ label: "Cloud database", ok: health.storage?.d1 }, { label: "Cloud photos", ok: health.storage?.photos }, { label: "Transactional email", ok: health.services?.email }, { label: "Passkeys", ok: health.services?.passkeys }); } catch { checks.push({ label: "Daysie API", ok: false }); }
+    const permission = "Notification" in window ? Notification.permission : "unsupported";
+    const checks = [{ label: "Online", ok: navigator.onLine }, { label: "Offline app", ok: "serviceWorker" in navigator && Boolean(await navigator.serviceWorker.getRegistration()) }, { label: "Notifications", ok: permission === "granted", detail: permission }, { label: "Installed", ok: matchMedia("(display-mode: standalone)").matches || navigator.standalone === true }];
+    try { const health = await (await fetch(`${API}/health`)).json(); checks.push({ label: "Cloud database", ok: health.storage?.d1 }, { label: "Push service", ok: health.services?.push }, { label: "Cloud photos", ok: health.storage?.photos }, { label: "Transactional email", ok: health.services?.email }, { label: "Passkeys", ok: health.services?.passkeys }); } catch { checks.push({ label: "Daysie API", ok: false }); }
     list.innerHTML = checks.map((check) => `<div><span>${check.ok ? "✅" : "⚠️"}</span><b>${safe(check.label)}</b>${check.detail ? `<small>${safe(check.detail)}</small>` : ""}</div>`).join("");
   }
   byId("refreshHealthBtn")?.addEventListener("click", refreshHealth);
@@ -165,7 +232,7 @@
   const originalUpdateAccountUI = updateAccountUI;
   updateAccountUI = function enhancedUpdateAccountUI() {
     originalUpdateAccountUI();
-    if (settings.authToken) { loadDevices(); loadInvitesAndActivity(); loadBackups(); loadNotificationPreferences(); refreshHealth(); byId("enableBackupsBtn").textContent = localStorage.getItem(BACKUP_KEY) ? "Encrypted backups enabled" : "Enable encrypted backups"; }
+    if (settings.authToken) { loadDevices(); loadInvitesAndActivity(); loadBackups(); loadNotificationPreferences(); loadPushStatus(); refreshHealth(); byId("enableBackupsBtn").textContent = localStorage.getItem(BACKUP_KEY) ? "Encrypted backups enabled" : "Enable encrypted backups"; }
   };
   setTimeout(() => settings.authToken && updateAccountUI(), 900);
   setInterval(() => { const last = Number(localStorage.getItem("daysie.lastEncryptedBackup") || 0); if (settings.authToken && localStorage.getItem(BACKUP_KEY) && Date.now() - last > 6 * 60 * 60 * 1000) backupNow(true); }, 5 * 60 * 1000);
