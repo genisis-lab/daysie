@@ -1,5 +1,5 @@
 // Daysie Service Worker - update-friendly caching + push notifications
-const CACHE_NAME = "daysie-v25";
+const CACHE_NAME = "daysie-v26";
 const CORE = [
   "./",
   "./index.html",
@@ -86,14 +86,23 @@ self.addEventListener("push", (event) => {
   }
   const title = data.title || "⏰ Daysie Reminder";
   const body = data.body || "You have a reminder!";
+  const vibrationPatterns = {
+    light: [80],
+    standard: [140, 70, 140],
+    strong: [220, 90, 220, 90, 280],
+  };
   const options = {
     body,
     icon: "./favicon.svg",
     badge: "./favicon.svg",
     tag: data.tag || "daysie-reminder",
+    renotify: true,
     requireInteraction: !!data.requireInteraction,
     data: safeClientUrl(data.url),
   };
+  if (data.tone === "none") options.silent = true;
+  else if (vibrationPatterns[data.vibration])
+    options.vibrate = vibrationPatterns[data.vibration];
   event.waitUntil(
     (async () => {
       if (
@@ -108,6 +117,8 @@ self.addEventListener("push", (event) => {
           w.postMessage({ type: "family-list-updated", body }),
         );
       }
+      if ("setAppBadge" in navigator)
+        await navigator.setAppBadge(Math.max(1, Number(data.badgeCount) || 1));
       await self.registration.showNotification(title, options);
     })(),
   );
@@ -116,11 +127,14 @@ self.addEventListener("push", (event) => {
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   event.waitUntil(
-    clients
-      .matchAll({ type: "window", includeUncontrolled: true })
-      .then((wins) => {
+    (async () => {
+      if ("clearAppBadge" in navigator) await navigator.clearAppBadge();
+      return clients
+        .matchAll({ type: "window", includeUncontrolled: true })
+        .then((wins) => {
         for (const w of wins) if ("focus" in w) return w.focus();
         return clients.openWindow(event.notification.data || "./");
-      }),
+        });
+    })(),
   );
 });

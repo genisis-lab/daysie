@@ -125,11 +125,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_user_data_version_revision ON user_data_ve
 CREATE INDEX IF NOT EXISTS idx_user_data_versions_user ON user_data_versions(user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS push_subscriptions (
-  user_id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  endpoint TEXT NOT NULL UNIQUE,
   subscription TEXT NOT NULL,
+  device_name TEXT,
+  user_agent TEXT,
   created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  last_success_at INTEGER,
+  last_failure_at INTEGER,
+  last_status INTEGER,
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS photo_access (
   key TEXT PRIMARY KEY,
@@ -204,7 +213,7 @@ CREATE TABLE IF NOT EXISTS recovery_codes (id TEXT PRIMARY KEY, user_id TEXT NOT
 CREATE INDEX IF NOT EXISTS idx_recovery_codes_user ON recovery_codes(user_id, used_at);
 CREATE TABLE IF NOT EXISTS family_activity (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, user_id TEXT NOT NULL, action TEXT NOT NULL, details TEXT, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_family_activity_family ON family_activity(family_id, created_at DESC);
-CREATE TABLE IF NOT EXISTS notification_preferences (user_id TEXT PRIMARY KEY, quiet_start TEXT, quiet_end TEXT, timezone TEXT NOT NULL DEFAULT 'UTC', categories TEXT NOT NULL DEFAULT '{"reminders":true,"family":true,"lists":true}', updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS notification_preferences (user_id TEXT PRIMARY KEY, quiet_start TEXT, quiet_end TEXT, timezone TEXT NOT NULL DEFAULT 'UTC', categories TEXT NOT NULL DEFAULT '{"reminders":true,"family":true,"lists":true}', tone TEXT NOT NULL DEFAULT 'system', vibration TEXT NOT NULL DEFAULT 'system', updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS encrypted_backups (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, envelope TEXT NOT NULL, size INTEGER NOT NULL, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_encrypted_backups_user ON encrypted_backups(user_id, created_at DESC);
 
