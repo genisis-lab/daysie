@@ -1347,7 +1347,19 @@ async function r(e, r) {
     )
       .bind(t)
       .first();
-  if (a && a.expires >= Date.now()) return a.user_id;
+  if (a) {
+    const now = Date.now(),
+      legacyGrace = 14 * 24 * 60 * 60 * 1000,
+      legacyTtl = 30 * 24 * 60 * 60 * 1000,
+      renewalWindow = 7 * 24 * 60 * 60 * 1000;
+    if (a.expires >= now - legacyGrace) {
+      if (a.expires < now + renewalWindow)
+        await r.DB.prepare("UPDATE sessions SET expires = ? WHERE token = ?")
+          .bind(now + legacyTtl, t)
+          .run();
+      return a.user_id;
+    }
+  }
   if (!r.BETTER_AUTH_SECRET) return null;
   try {
     const authSession = await createDaysieAuth(r, e).api.getSession({

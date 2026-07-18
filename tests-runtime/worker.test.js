@@ -90,6 +90,22 @@ describe("Daysie Worker runtime", () => {
     });
   });
 
+  it("renews a recently expired legacy PWA session without changing identity", async () => {
+    const userId = crypto.randomUUID();
+    const token = crypto.randomUUID();
+    const expiredAt = Date.now() - 5 * 24 * 60 * 60 * 1000;
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO users (id, created_at) VALUES (?, ?)").bind(userId, Date.now()),
+      env.DB.prepare("INSERT INTO sessions (token, user_id, expires) VALUES (?, ?, ?)").bind(token, userId, expiredAt),
+    ]);
+    const response = await SELF.fetch("https://daysie.test/push/status", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(response.status).toBe(200);
+    const renewed = await env.DB.prepare("SELECT expires FROM sessions WHERE token = ?").bind(token).first();
+    expect(renewed.expires).toBeGreaterThan(Date.now() + 29 * 24 * 60 * 60 * 1000);
+  });
+
   it("delivers a family task to the recipient inbox even without push", async () => {
     const familyId = crypto.randomUUID();
     const senderId = crypto.randomUUID();
