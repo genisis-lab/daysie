@@ -1,5 +1,5 @@
 // Daysie Service Worker - update-friendly caching + push notifications
-const CACHE_NAME = "daysie-v23";
+const CACHE_NAME = "daysie-v24";
 const CORE = [
   "./",
   "./index.html",
@@ -10,6 +10,7 @@ const CORE = [
   "./auth-ui.js",
   "./auth-client.bundle.js",
   "./account-features.js",
+  "./power-features.js",
   "./favicon.svg",
   "./site.webmanifest",
   "./version.json",

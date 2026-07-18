@@ -28,7 +28,11 @@ function parseQuickAdd(t) {
   const l = [];
   let c = i.match(/\b(important|urgent|high priority|asap)\b/);
   (c && ((s = "high"), l.push(c[0])),
-    /\bevery day\b|\bdaily\b/.test(i)
+    /\bevery weekday\b|\bweekdays\b/.test(i)
+      ? ((a = "weekdays"), l.push("every weekday", "weekdays"))
+      : /\bevery (?:other|2) weeks?\b|\bbiweekly\b/.test(i)
+        ? ((a = "biweekly"), l.push("every other week", "every 2 weeks", "biweekly"))
+      : /\bevery day\b|\bdaily\b/.test(i)
       ? ((a = "daily"), l.push("every day", "daily"))
       : /\bevery week\b|\bweekly\b/.test(i)
         ? ((a = "weekly"), l.push("every week", "weekly"))
@@ -106,6 +110,12 @@ function parseQuickAdd(t) {
                   (r = !0),
                   l.push("this evening", "evening")));
   r && !d && o.setHours(9, 0, 0, 0);
+  let assigneeId = null;
+  const familyMembers = window.family?.members || [];
+  for (const member of familyMembers) {
+    const match = i.match(new RegExp(`\\bfor\\s+${String(member.name || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i"));
+    if (match) { assigneeId = member.isMe ? null : member.userId; l.push(match[0]); break; }
+  }
   let b = e;
   (l
     .sort((t, e) => e.length - t.length)
@@ -124,7 +134,7 @@ function parseQuickAdd(t) {
     b || (b = e),
     (b = b.charAt(0).toUpperCase() + b.slice(1)));
   const h = r || d ? o.getTime() : null;
-  return { title: b, due: h, priority: s, repeat: a, category: n };
+  return { title: b, due: h, priority: s, repeat: a, category: n, assignee: assigneeId };
 }
 function quickAdd(t) {
   const e = (t || "").trim();
@@ -141,7 +151,7 @@ function quickAdd(t) {
     repeat: i.repeat,
     repeatUntil: null,
     category: i.category,
-    assignee: null,
+    assignee: i.assignee,
     subtasks: [],
     notified: !1,
   }),
@@ -352,6 +362,36 @@ async function syncSharedLists(t) {
     } catch (t) {}
   }
 }
+const groceryCategories = [
+  ["Produce", /\b(apple|banana|berry|berries|lettuce|tomato|onion|potato|fruit|vegetable|avocado|carrot|pepper)\b/i],
+  ["Dairy & eggs", /\b(milk|cheese|yogurt|butter|egg|eggs|cream)\b/i],
+  ["Bakery", /\b(bread|bagel|roll|tortilla|bun|muffin)\b/i],
+  ["Meat & seafood", /\b(chicken|beef|pork|fish|salmon|turkey|shrimp|meat)\b/i],
+  ["Pantry", /\b(rice|pasta|flour|sugar|oil|sauce|cereal|coffee|tea|can|beans)\b/i],
+  ["Frozen", /\b(frozen|ice cream|pizza)\b/i],
+  ["Household", /\b(soap|detergent|paper|foil|cleaner|trash bag|toilet)\b/i],
+];
+function smartListItem(value) {
+  let text = String(value || "").trim();
+  const priceMatch = text.match(/\$([0-9]+(?:\.[0-9]{1,2})?)/);
+  const storeMatch = text.match(/\s@([\w '&.-]+)$/);
+  const quantityMatch = text.match(/^(\d+(?:\.\d+)?)\s*(x|lb|lbs|oz|kg|g|l|ml|pack|packs|dozen)?\s+/i);
+  const price = priceMatch ? Number(priceMatch[1]) : null;
+  const store = storeMatch ? storeMatch[1].trim() : "";
+  const quantity = quantityMatch ? Number(quantityMatch[1]) : 1;
+  const unit = quantityMatch?.[2] || "";
+  text = text.replace(/\$[0-9]+(?:\.[0-9]{1,2})?/, "").replace(/\s@[\w '&.-]+$/, "").replace(/^\d+(?:\.\d+)?\s*(?:x|lb|lbs|oz|kg|g|l|ml|pack|packs|dozen)?\s+/i, "").trim();
+  const category = groceryCategories.find(([, pattern]) => pattern.test(text))?.[0] || "Other";
+  return { text, quantity, unit, price, store, category };
+}
+function smartListMeta(item) {
+  return [
+    item.quantity && item.quantity !== 1 ? `${item.quantity}${item.unit ? ` ${item.unit}` : ""}` : "",
+    item.category && item.category !== "Other" ? item.category : "",
+    item.store ? `@ ${item.store}` : "",
+    Number.isFinite(item.price) ? `$${item.price.toFixed(2)}` : "",
+  ].filter(Boolean).join(" · ");
+}
 function renderLists() {
   const t = $("#listsList");
   if (!t) return;
@@ -361,9 +401,10 @@ function renderLists() {
       '<div class="habit-empty">No shared lists yet. Tap “Manage” to create one. 📝</div>');
   ((t.innerHTML = e
     .map((t) => {
-      const e = t.items || [],
-        i = e.filter((t) => !t.done).length;
-      return `<article class="list-card">\n      <div class="list-head"><b>${esc(t.emoji || "📝")} ${esc(t.name)}</b><small>${i} left</small></div>\n      <div class="list-items">${e.map((e) => `<button type="button" class="list-item ${e.done ? "done" : ""}" data-list="${safeDomId(t.id)}" data-item="${safeDomId(e.id)}"><span class="subcheck">${e.done ? "✓" : ""}</span><span>${esc(e.text)}</span></button>`).join("")}</div>\n      <div class="list-add-row"><input class="list-add-input" data-listadd="${safeDomId(t.id)}" maxlength="80" placeholder="Add item…" /><button type="button" class="soft small" data-listaddbtn="${safeDomId(t.id)}">+</button></div>\n    </article>`;
+      const e = [...(t.items || [])].sort((a, b) => String(a.category || "Other").localeCompare(String(b.category || "Other"))),
+        i = e.filter((t) => !t.done).length,
+        total = e.reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1), 0);
+      return `<article class="list-card">\n      <div class="list-head"><b>${esc(t.emoji || "📝")} ${esc(t.name)}</b><small>${i} left${total ? ` · est. $${total.toFixed(2)}` : ""}</small></div>\n      <div class="list-items">${e.map((e) => `<button type="button" class="list-item ${e.done ? "done" : ""}" data-list="${safeDomId(t.id)}" data-item="${safeDomId(e.id)}"><span class="subcheck">${e.done ? "✓" : ""}</span><span>${esc(e.text)}${smartListMeta(e) ? `<small>${esc(smartListMeta(e))}</small>` : ""}</span></button>`).join("")}</div>\n      <div class="list-add-row"><input class="list-add-input" data-listadd="${safeDomId(t.id)}" maxlength="80" placeholder="Try: 2 lb apples $4 @ Market" aria-label="Add a smart list item" /><button type="button" class="soft small" data-listaddbtn="${safeDomId(t.id)}">+</button></div>\n    </article>`;
     })
     .join("")),
     $$("#listsList [data-item]").forEach(
@@ -396,7 +437,7 @@ function renderLists() {
       (s.items || (s.items = []),
       s.items.push({
         id: id(),
-        text: i,
+        ...smartListItem(i),
         done: !1,
         by: getProfile().name,
         updatedAt: Date.now(),
@@ -441,15 +482,16 @@ function renderListManageList() {
           confirm(
             "🗑️",
             "Delete list?",
-            "This removes it for everyone.",
+            "It moves to Recently deleted and updates for everyone.",
             () => {
               const e = (db.lists || []).find(
                 (e) => e.id === t.dataset.dellist,
               );
-              (e && ((e.deleted = !0), (e.updatedAt = Date.now())),
+              (e && (moveToTrash("list", e), (e.deleted = !0), (e.updatedAt = Date.now())),
                 save(),
                 renderListManageList(),
                 renderLists(),
+                showUndo("List moved to trash"),
                 syncSharedLists("deleted a shared list"));
             },
             () => {},
