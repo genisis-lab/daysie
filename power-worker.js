@@ -15,7 +15,7 @@ const changed = (result) =>
 
 async function familyFor(env, userId) {
   return env.DB.prepare(
-    "SELECT family_id, name, emoji, color, availability, availability_until FROM family_members WHERE user_id = ?",
+    "SELECT family_id, name, emoji, color, availability, availability_until, availability_note, dnd_until FROM family_members WHERE user_id = ?",
   )
     .bind(userId)
     .first();
@@ -189,7 +189,7 @@ export async function handlePowerRequest({ request, env, userId, corsHeaders }) 
       );
     const [members, events, assignments, listRow] = await Promise.all([
       env.DB.prepare(
-        "SELECT user_id, name, emoji, color, availability, availability_until FROM family_members WHERE family_id = ? ORDER BY joined",
+        "SELECT user_id, name, emoji, color, availability, availability_until, availability_note, dnd_until FROM family_members WHERE family_id = ? ORDER BY joined",
       )
         .bind(member.family_id)
         .all(),
@@ -199,7 +199,7 @@ export async function handlePowerRequest({ request, env, userId, corsHeaders }) 
         .bind(member.family_id, Date.now() - 24 * 60 * 60 * 1000)
         .all(),
       env.DB.prepare(
-        "SELECT id, from_user, to_user, kind, payload, fire_at, status, created FROM assigned_items WHERE family_id = ? AND status != 'done' ORDER BY COALESCE(fire_at, created) LIMIT 40",
+        "SELECT id, from_user, to_user, kind, payload, fire_at, status, created, push_delivered_at, seen_at, completed_at FROM assigned_items WHERE family_id = ? AND status != 'done' ORDER BY COALESCE(fire_at, created) LIMIT 40",
       )
         .bind(member.family_id)
         .all(),
@@ -217,6 +217,8 @@ export async function handlePowerRequest({ request, env, userId, corsHeaders }) 
           color: row.color,
           availability: row.availability || "free",
           availabilityUntil: row.availability_until || null,
+          availabilityNote: row.availability_note || "",
+          dndUntil: row.dnd_until || null,
           isMe: row.user_id === userId,
         })),
         events: (events.results || []).map(mapEvent),
@@ -229,6 +231,9 @@ export async function handlePowerRequest({ request, env, userId, corsHeaders }) 
           fireAt: row.fire_at,
           status: row.status,
           createdAt: row.created,
+          pushDeliveredAt: row.push_delivered_at || null,
+          seenAt: row.seen_at || null,
+          completedAt: row.completed_at || null,
         })),
         lists: listRow?.lists ? JSON.parse(listRow.lists) : [],
         listsUpdatedAt: listRow?.updated || 0,

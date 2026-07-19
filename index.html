@@ -442,10 +442,11 @@
         </div>
 
         <div id="familySyncGate" class="hidden">
-          <p style="color: var(--soft); font-weight: 700">
-            Sign in first to link family members. Open Settings → Sync &amp;
-            account, then come back here.
-          </p>
+          <div class="family-onboarding-gate">
+            <span aria-hidden="true">👨‍👩‍👧</span>
+            <div><b>Bring your family into Daysie</b><p>Sign in or create an account, then Daysie will return you here to join, invite, and share.</p></div>
+            <div class="row-actions"><button type="button" id="familyGateSignIn" class="soft">Sign in</button><button type="button" id="familyGateCreate" class="primary">Create account</button></div>
+          </div>
         </div>
 
         <div id="familyBody">
@@ -475,6 +476,12 @@
           <label for="familyAvailability">My availability
             <select id="familyAvailability" class="fam-select"><option value="free">Free</option><option value="busy">Busy</option><option value="away">Away</option><option value="quiet">Quiet time</option></select>
           </label>
+          <div class="availability-controls">
+            <label for="familyAvailabilityNote">Status note<input id="familyAvailabilityNote" maxlength="120" placeholder="Free after 6, studying, at work…" /></label>
+            <label for="familyAvailabilityUntil">Until<input id="familyAvailabilityUntil" type="datetime-local" /></label>
+            <label class="check-row"><input id="familyDnd" type="checkbox" /><span>Pause family nudges while unavailable</span></label>
+            <button type="button" id="saveFamilyAvailability" class="soft wide">Update availability</button>
+          </div>
           <div id="familyDashboard" class="family-dashboard"><small>Sign in to see your family dashboard.</small></div>
           <details class="feature-details family-event-editor">
             <summary>Add a family calendar event</summary>
@@ -485,6 +492,27 @@
               <label for="familyEventNote">Note</label><textarea id="familyEventNote" maxlength="1000"></textarea>
               <button type="submit" class="primary wide">Add to family calendar</button>
             </form>
+          </details>
+          <div class="calendar-transfer-actions">
+            <button type="button" id="exportFamilyCalendar" class="soft">Export .ics</button>
+            <button type="button" id="importFamilyCalendar" class="soft">Import .ics</button>
+            <input id="familyCalendarFile" class="visually-hidden" type="file" accept="text/calendar,.ics" />
+          </div>
+          <details class="feature-details family-event-editor">
+            <summary>Create a rotating family chore</summary>
+            <form id="familyChoreForm" class="auth-form">
+              <label for="familyChoreTitle">Chore name</label><input id="familyChoreTitle" maxlength="100" required placeholder="Take out recycling" />
+              <label for="familyChoreNote">Note</label><textarea id="familyChoreNote" maxlength="500"></textarea>
+              <label for="familyChoreDue">First due</label><input id="familyChoreDue" type="datetime-local" required />
+              <label for="familyChoreRecurrence">Repeats</label><select id="familyChoreRecurrence" class="fam-select"><option value="daily">Daily</option><option value="weekdays">Weekdays</option><option value="weekly" selected>Weekly</option><option value="biweekly">Every 2 weeks</option><option value="monthly">Monthly</option></select>
+              <fieldset class="member-checklist"><legend>Rotate between</legend><div id="familyChoreMembers"></div></fieldset>
+              <button type="submit" class="primary wide">Create rotating chore</button>
+            </form>
+          </details>
+          <div id="familyChoreList" class="feature-list" aria-live="polite"></div>
+          <details class="feature-details family-event-editor">
+            <summary>Sent task delivery</summary>
+            <div id="familyReceiptList" class="feature-list" aria-live="polite"><small>No sent tasks yet.</small></div>
           </details>
           <div class="row" style="margin-top: 10px">
             <button type="button" id="famInviteBtn" class="primary">
@@ -854,6 +882,7 @@
               <button type="button" id="backupNowBtn" class="soft wide">Back up now</button>
               <button type="button" id="copyBackupKeyBtn" class="text-button">Copy recovery key</button>
               <div id="backupList" class="feature-list"></div>
+              <small class="field-hint">Verify checks both the cloud envelope and a local test decryption without replacing your data.</small>
             </section>
             <section class="settings-feature-card" aria-labelledby="notificationPrefsTitle">
               <div class="feature-heading"><span>🔔</span><div><b id="notificationPrefsTitle">Notification preferences</b><small>Choose what reaches you, how alerts feel, and when Daysie stays quiet.</small></div></div>
@@ -883,7 +912,15 @@
                 </label>
               </div>
               <small id="notificationPlatformNote" class="notification-platform-note"></small>
+              <div id="notificationDiagnostics" class="notification-diagnostics" role="status" aria-live="polite"></div>
+              <button type="button" id="reconnectNotificationsBtn" class="soft wide">Reconnect this device</button>
               <div class="time-grid"><label>Quiet from<input id="quietStart" type="time" value="22:00" /></label><label>Quiet until<input id="quietEnd" type="time" value="07:00" /></label></div>
+              <fieldset class="digest-settings"><legend>Digests</legend>
+                <label class="check-row"><input id="digestMorning" type="checkbox" /><span>Morning</span></label>
+                <label class="check-row"><input id="digestEvening" type="checkbox" /><span>Evening</span></label>
+                <label class="check-row"><input id="digestWeekly" type="checkbox" /><span>Weekly overview</span></label>
+                <label for="digestTime">Morning / weekly time<input id="digestTime" type="time" value="08:00" /></label>
+              </fieldset>
               <small id="timezoneLabel" class="field-hint"></small>
               <button type="button" id="saveNotificationPrefsBtn" class="soft wide">Save notification preferences</button>
               <div class="notification-test-actions">
@@ -1210,5 +1247,6 @@
     <script defer src="auth-ui.js"></script>
     <script defer src="account-features.js"></script>
     <script defer src="power-features.js"></script>
+    <script defer src="reliability-features.js"></script>
   </body>
 </html>

@@ -4,6 +4,10 @@ import {
   sendDaysieEmail,
 } from "./auth.js";
 import { handlePowerRequest } from "./power-worker.js";
+import {
+  handleReliabilityRequest,
+  runReliabilitySchedule,
+} from "./reliability-worker.js";
 
 export default {
   async fetch(e, E, executionContext) {
@@ -15,7 +19,7 @@ export default {
         "Access-Control-Allow-Origin": corsOrigin,
         "Access-Control-Allow-Credentials": "true",
         Vary: "Origin",
-        "Access-Control-Allow-Methods": "GET, POST, DELETE, PUT, OPTIONS",
+        "Access-Control-Allow-Methods": "GET, POST, DELETE, PUT, PATCH, OPTIONS",
         "Access-Control-Allow-Headers":
           "Content-Type, Authorization, X-Daysie-Legacy-Token",
         "Access-Control-Expose-Headers": "set-auth-token",
@@ -451,8 +455,8 @@ export default {
       if ("/notification-preferences" === p && "GET" === e.method) {
         const userId = await r(e, E);
         if (!userId) return c({ error: "Unauthorized" }, 401, m);
-        const row = await E.DB.prepare("SELECT quiet_start, quiet_end, timezone, categories, tone, vibration, updated_at FROM notification_preferences WHERE user_id = ?").bind(userId).first();
-        return c(row ? { quietStart: row.quiet_start, quietEnd: row.quiet_end, timezone: row.timezone, categories: JSON.parse(row.categories), tone: notificationChoice(row.tone, ["system", "gentle", "bright", "soft", "none"]), vibration: notificationChoice(row.vibration, ["system", "light", "standard", "strong", "none"]), updatedAt: row.updated_at } : { quietStart: "22:00", quietEnd: "07:00", timezone: "UTC", categories: { reminders: true, family: true, lists: true }, tone: "system", vibration: "system" }, 200, m);
+        const row = await E.DB.prepare("SELECT quiet_start, quiet_end, timezone, categories, tone, vibration, digest_morning, digest_evening, digest_weekly, digest_time, updated_at FROM notification_preferences WHERE user_id = ?").bind(userId).first();
+        return c(row ? { quietStart: row.quiet_start, quietEnd: row.quiet_end, timezone: row.timezone, categories: JSON.parse(row.categories), tone: notificationChoice(row.tone, ["system", "gentle", "bright", "soft", "none"]), vibration: notificationChoice(row.vibration, ["system", "light", "standard", "strong", "none"]), digests: { morning: Boolean(row.digest_morning), evening: Boolean(row.digest_evening), weekly: Boolean(row.digest_weekly), time: row.digest_time || "08:00" }, updatedAt: row.updated_at } : { quietStart: "22:00", quietEnd: "07:00", timezone: "UTC", categories: { reminders: true, family: true, lists: true }, tone: "system", vibration: "system", digests: { morning: false, evening: false, weekly: false, time: "08:00" } }, 200, m);
       }
       if ("/notification-preferences" === p && "PUT" === e.method) {
         const userId = await r(e, E);
@@ -465,7 +469,8 @@ export default {
         const categories = { reminders: body.categories?.reminders !== false, family: body.categories?.family !== false, lists: body.categories?.lists !== false };
         const tone = notificationChoice(body.tone, ["system", "gentle", "bright", "soft", "none"]);
         const vibration = notificationChoice(body.vibration, ["system", "light", "standard", "strong", "none"]);
-        await E.DB.prepare("INSERT OR REPLACE INTO notification_preferences (user_id, quiet_start, quiet_end, timezone, categories, tone, vibration, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(userId, quietStart, quietEnd, timezone, JSON.stringify(categories), tone, vibration, Date.now()).run();
+        const digestTime = timePattern.test(body.digests?.time || "") ? body.digests.time : "08:00";
+        await E.DB.prepare("INSERT OR REPLACE INTO notification_preferences (user_id, quiet_start, quiet_end, timezone, categories, tone, vibration, digest_morning, digest_evening, digest_weekly, digest_time, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(userId, quietStart, quietEnd, timezone, JSON.stringify(categories), tone, vibration, body.digests?.morning ? 1 : 0, body.digests?.evening ? 1 : 0, body.digests?.weekly ? 1 : 0, digestTime, Date.now()).run();
         return c({ success: true }, 200, m);
       }
       if ("/backups" === p && "GET" === e.method) {
@@ -518,6 +523,8 @@ export default {
           E.DB.prepare("DELETE FROM recovery_codes WHERE user_id = ?").bind(userId),
           E.DB.prepare("DELETE FROM notification_preferences WHERE user_id = ?").bind(userId),
           E.DB.prepare("DELETE FROM encrypted_backups WHERE user_id = ?").bind(userId),
+          E.DB.prepare("DELETE FROM backup_verifications WHERE user_id = ?").bind(userId),
+          E.DB.prepare("DELETE FROM notification_digest_log WHERE user_id = ?").bind(userId),
           E.DB.prepare("DELETE FROM user_data_versions WHERE user_id = ?").bind(userId),
           E.DB.prepare("DELETE FROM security_events WHERE user_id = ?").bind(userId),
           E.DB.prepare("DELETE FROM family_comments WHERE user_id = ?").bind(userId),
@@ -558,12 +565,13 @@ export default {
         const userId = await r(e, E);
         if (!userId) return c({ error: "Unauthorized" }, 401, m);
         const rows = await E.DB.prepare(
-          "SELECT id, device_name, user_agent, created_at, updated_at, last_success_at, last_failure_at, last_status FROM push_subscriptions WHERE user_id = ? ORDER BY updated_at DESC",
+          "SELECT id, device_name, user_agent, enabled, created_at, updated_at, last_success_at, last_failure_at, last_status FROM push_subscriptions WHERE user_id = ? ORDER BY updated_at DESC",
         ).bind(userId).all();
         return c({
           devices: (rows.results || []).map((row) => ({
             id: row.id,
             name: row.device_name || friendlyDeviceName(row.user_agent),
+            enabled: row.enabled !== 0,
             createdAt: row.created_at,
             updatedAt: row.updated_at,
             lastSuccessAt: row.last_success_at,
@@ -1263,20 +1271,22 @@ export default {
             from: r ? { name: r.name, emoji: r.emoji, color: r.color } : null,
           });
         }
+        if (a.length)
+          await E.DB.prepare(
+            "UPDATE assigned_items SET seen_at = COALESCE(seen_at, ?), status = CASE WHEN status = 'pending' THEN 'seen' ELSE status END WHERE to_user = ? AND status != 'done'",
+          ).bind(Date.now(), i).run();
         return c({ items: a }, 200, m);
       }
       if ("/family/inbox/ack" === p && "POST" === e.method) {
         const i = await r(e, E);
         if (!i) return c({ error: "Unauthorized" }, 401, m);
         const { id: t, status: a } = await e.json();
-        return (
-          await E.DB.prepare(
-            "UPDATE assigned_items SET status = ? WHERE id = ? AND to_user = ?",
-          )
-            .bind(a || "done", t, i)
-            .run(),
-          c({ success: !0 }, 200, m)
-        );
+        const status = a || "done",
+          now = Date.now();
+        await E.DB.prepare(
+          "UPDATE assigned_items SET status = ?, seen_at = COALESCE(seen_at, ?), completed_at = CASE WHEN ? = 'done' THEN ? ELSE completed_at END WHERE id = ? AND to_user = ?",
+        ).bind(status, now, status, now, t, i).run();
+        return c({ success: !0 }, 200, m);
       }
       if (p.startsWith("/features/")) {
         const userId = await r(e, E);
@@ -1285,6 +1295,17 @@ export default {
           env: E,
           userId,
           corsHeaders: m,
+        });
+      }
+      if (p.startsWith("/reliability/")) {
+        const userId = await r(e, E);
+        return await handleReliabilityRequest({
+          request: e,
+          env: E,
+          userId,
+          corsHeaders: m,
+          sendPush: (targetUserId, payload, category) =>
+            sendPushToUser(E, targetUserId, payload, category),
         });
       }
       return c({ error: "Not found" }, 404, m);
@@ -1314,6 +1335,8 @@ export default {
                   tag: s.id,
                   requireInteraction: "high" === s.priority,
                   type: "reminder",
+                  taskId: s.id,
+                  url: `/?tab=today&task=${encodeURIComponent(s.id)}`,
                   badgeCount: 1,
                 }, "reminders", e);
               delivery.sent > 0 && (s.notified = true);
@@ -1333,6 +1356,12 @@ export default {
       for (const e of n.results) {
         await a(r, e);
       }
+      await runReliabilitySchedule(
+        r,
+        e,
+        (targetUserId, payload, category) =>
+          sendPushToUser(r, targetUserId, payload, category, e),
+      );
     } catch (e) {
       console.error("Scheduled push error:", e);
     }
@@ -1403,6 +1432,10 @@ async function i(r) {
     r.DB.prepare("CREATE TABLE IF NOT EXISTS family_events (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, creator_user_id TEXT NOT NULL, title TEXT NOT NULL, note TEXT, starts_at INTEGER NOT NULL, ends_at INTEGER, all_day INTEGER NOT NULL DEFAULT 0, recurrence TEXT NOT NULL DEFAULT 'none', color TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)"),
     r.DB.prepare("CREATE TABLE IF NOT EXISTS family_comments (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, item_id TEXT NOT NULL, user_id TEXT NOT NULL, body TEXT, reaction TEXT, created_at INTEGER NOT NULL)"),
     r.DB.prepare("CREATE TABLE IF NOT EXISTS performance_metrics (id TEXT PRIMARY KEY, user_id TEXT, metric TEXT NOT NULL, value REAL NOT NULL, rating TEXT, path TEXT, created_at INTEGER NOT NULL)"),
+    r.DB.prepare("CREATE TABLE IF NOT EXISTS account_migrations (legacy_user_id TEXT PRIMARY KEY, better_auth_user_id TEXT NOT NULL, migrated_at INTEGER NOT NULL)"),
+    r.DB.prepare("CREATE TABLE IF NOT EXISTS family_chores (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, creator_user_id TEXT NOT NULL, title TEXT NOT NULL, note TEXT, recurrence TEXT NOT NULL, assignee_order TEXT NOT NULL, next_assignee_index INTEGER NOT NULL DEFAULT 0, next_due_at INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)"),
+    r.DB.prepare("CREATE TABLE IF NOT EXISTS notification_digest_log (user_id TEXT NOT NULL, digest_type TEXT NOT NULL, period_key TEXT NOT NULL, sent_at INTEGER NOT NULL, PRIMARY KEY (user_id, digest_type, period_key))"),
+    r.DB.prepare("CREATE TABLE IF NOT EXISTS backup_verifications (backup_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, envelope_hash TEXT NOT NULL, verified_at INTEGER NOT NULL)"),
   ]);
   try {
     await r.DB.prepare(
@@ -1433,6 +1466,22 @@ async function i(r) {
   try {
     await r.DB.prepare("ALTER TABLE family_members ADD COLUMN availability_until INTEGER").run();
   } catch (r) {}
+  for (const statement of [
+    "ALTER TABLE push_subscriptions ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE assigned_items ADD COLUMN push_delivered_at INTEGER",
+    "ALTER TABLE assigned_items ADD COLUMN seen_at INTEGER",
+    "ALTER TABLE assigned_items ADD COLUMN completed_at INTEGER",
+    "ALTER TABLE assigned_items ADD COLUMN snoozed_until INTEGER",
+    "ALTER TABLE assigned_items ADD COLUMN recurrence_id TEXT",
+    "ALTER TABLE notification_preferences ADD COLUMN digest_morning INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE notification_preferences ADD COLUMN digest_evening INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE notification_preferences ADD COLUMN digest_weekly INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE notification_preferences ADD COLUMN digest_time TEXT NOT NULL DEFAULT '08:00'",
+    "ALTER TABLE family_members ADD COLUMN availability_note TEXT",
+    "ALTER TABLE family_members ADD COLUMN dnd_until INTEGER",
+  ]) {
+    try { await r.DB.prepare(statement).run(); } catch {}
+  }
 }
 
 async function recordSecurityEvent(env, userId, event, request, details = null) {
@@ -1502,6 +1551,11 @@ async function notificationPolicy(env, userId, category, timestamp = Date.now())
     tone: notificationChoice(row?.tone, ["system", "gentle", "bright", "soft", "none"]),
     vibration: notificationChoice(row?.vibration, ["system", "light", "standard", "strong", "none"]),
   };
+  if (category === "family") {
+    const availability = await env.DB.prepare("SELECT dnd_until FROM family_members WHERE user_id = ?").bind(userId).first();
+    if (Number(availability?.dnd_until || 0) > timestamp)
+      return { ...policy, allowed: false };
+  }
   if (!row) return policy;
   try {
     const categories = JSON.parse(row.categories || "{}");
@@ -1523,7 +1577,7 @@ async function sendPushToUser(env, userId, payload, category = "reminders", time
   if (!policy.allowed && !bypassQuietHours)
     return { attempted: 0, sent: 0, failed: 0, suppressed: true };
   const rows = await env.DB.prepare(
-    "SELECT id, subscription FROM push_subscriptions WHERE user_id = ? ORDER BY updated_at DESC",
+    "SELECT id, subscription FROM push_subscriptions WHERE user_id = ? AND enabled != 0 ORDER BY updated_at DESC",
   ).bind(userId).all();
   let sent = 0,
     failed = 0;
@@ -1602,12 +1656,14 @@ async function a(e, r) {
         tag: r.id,
         requireInteraction: false,
         type: r.kind,
+        assignmentId: r.id,
+        url: `/?tab=family&assignment=${encodeURIComponent(r.id)}`,
         badgeCount: 1,
       }, "family");
     delivery.sent > 0 &&
       (await e.DB.prepare(
-        "UPDATE assigned_items SET notified = 1 WHERE id = ?",
-      ).bind(r.id).run());
+        "UPDATE assigned_items SET notified = 1, push_delivered_at = ? WHERE id = ?",
+      ).bind(Date.now(), r.id).run());
     return delivery;
   } catch (e) {
     console.error("pushAssignedItem error:", e);
