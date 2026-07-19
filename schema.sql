@@ -136,6 +136,7 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   last_success_at INTEGER,
   last_failure_at INTEGER,
   last_status INTEGER,
+  enabled INTEGER NOT NULL DEFAULT 1,
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id, updated_at DESC);
@@ -162,7 +163,9 @@ CREATE TABLE IF NOT EXISTS family_members (
   color TEXT,
   joined INTEGER,
   availability TEXT DEFAULT 'free',
-  availability_until INTEGER
+  availability_until INTEGER,
+  availability_note TEXT,
+  dnd_until INTEGER
 );
 CREATE TABLE IF NOT EXISTS family_invites (
   code TEXT PRIMARY KEY,
@@ -187,7 +190,12 @@ CREATE TABLE IF NOT EXISTS assigned_items (
   fire_at INTEGER,
   status TEXT,
   notified INTEGER,
-  created INTEGER
+  created INTEGER,
+  push_delivered_at INTEGER,
+  seen_at INTEGER,
+  completed_at INTEGER,
+  snoozed_until INTEGER,
+  recurrence_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_family_members_family ON family_members(family_id);
 CREATE INDEX IF NOT EXISTS idx_assigned_to ON assigned_items(to_user, status);
@@ -213,7 +221,7 @@ CREATE TABLE IF NOT EXISTS recovery_codes (id TEXT PRIMARY KEY, user_id TEXT NOT
 CREATE INDEX IF NOT EXISTS idx_recovery_codes_user ON recovery_codes(user_id, used_at);
 CREATE TABLE IF NOT EXISTS family_activity (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, user_id TEXT NOT NULL, action TEXT NOT NULL, details TEXT, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_family_activity_family ON family_activity(family_id, created_at DESC);
-CREATE TABLE IF NOT EXISTS notification_preferences (user_id TEXT PRIMARY KEY, quiet_start TEXT, quiet_end TEXT, timezone TEXT NOT NULL DEFAULT 'UTC', categories TEXT NOT NULL DEFAULT '{"reminders":true,"family":true,"lists":true}', tone TEXT NOT NULL DEFAULT 'system', vibration TEXT NOT NULL DEFAULT 'system', updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS notification_preferences (user_id TEXT PRIMARY KEY, quiet_start TEXT, quiet_end TEXT, timezone TEXT NOT NULL DEFAULT 'UTC', categories TEXT NOT NULL DEFAULT '{"reminders":true,"family":true,"lists":true}', tone TEXT NOT NULL DEFAULT 'system', vibration TEXT NOT NULL DEFAULT 'system', digest_morning INTEGER NOT NULL DEFAULT 0, digest_evening INTEGER NOT NULL DEFAULT 0, digest_weekly INTEGER NOT NULL DEFAULT 0, digest_time TEXT NOT NULL DEFAULT '08:00', updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS encrypted_backups (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, envelope TEXT NOT NULL, size INTEGER NOT NULL, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_encrypted_backups_user ON encrypted_backups(user_id, created_at DESC);
 
@@ -225,3 +233,11 @@ CREATE TABLE IF NOT EXISTS family_comments (id TEXT PRIMARY KEY, family_id TEXT 
 CREATE INDEX IF NOT EXISTS idx_family_comments_item ON family_comments(family_id, item_id, created_at);
 CREATE TABLE IF NOT EXISTS performance_metrics (id TEXT PRIMARY KEY, user_id TEXT, metric TEXT NOT NULL, value REAL NOT NULL, rating TEXT, path TEXT, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_performance_metrics_created ON performance_metrics(created_at DESC);
+CREATE TABLE IF NOT EXISTS account_migrations (legacy_user_id TEXT PRIMARY KEY, better_auth_user_id TEXT NOT NULL, migrated_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_account_migrations_better_auth ON account_migrations(better_auth_user_id, migrated_at DESC);
+CREATE TABLE IF NOT EXISTS family_chores (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, creator_user_id TEXT NOT NULL, title TEXT NOT NULL, note TEXT, recurrence TEXT NOT NULL, assignee_order TEXT NOT NULL, next_assignee_index INTEGER NOT NULL DEFAULT 0, next_due_at INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_family_chores_due ON family_chores(active, next_due_at);
+CREATE INDEX IF NOT EXISTS idx_family_chores_family ON family_chores(family_id, active, next_due_at);
+CREATE TABLE IF NOT EXISTS notification_digest_log (user_id TEXT NOT NULL, digest_type TEXT NOT NULL, period_key TEXT NOT NULL, sent_at INTEGER NOT NULL, PRIMARY KEY (user_id, digest_type, period_key));
+CREATE TABLE IF NOT EXISTS backup_verifications (backup_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, envelope_hash TEXT NOT NULL, verified_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_assigned_receipts ON assigned_items(family_id, created DESC, seen_at, completed_at);
