@@ -1,5 +1,5 @@
 // Daysie Service Worker - update-friendly caching + push notifications
-const CACHE_NAME = "daysie-v27";
+const CACHE_NAME = "daysie-v28";
 const CORE = [
   "./",
   "./index.html",
@@ -11,6 +11,7 @@ const CORE = [
   "./auth-client.bundle.js",
   "./account-features.js",
   "./power-features.js",
+  "./reliability-features.js",
   "./favicon.svg",
   "./site.webmanifest",
   "./version.json",
@@ -98,8 +99,18 @@ self.addEventListener("push", (event) => {
     tag: data.tag || "daysie-reminder",
     renotify: true,
     requireInteraction: !!data.requireInteraction,
-    data: safeClientUrl(data.url),
+    data: {
+      url: safeClientUrl(data.url),
+      assignmentId: data.assignmentId || null,
+      taskId: data.taskId || null,
+    },
   };
+  if (data.assignmentId || data.taskId) {
+    options.actions = [
+      { action: "complete", title: "Complete" },
+      { action: "snooze", title: "Snooze 1 hour" },
+    ];
+  }
   if (data.tone === "none") options.silent = true;
   else if (vibrationPatterns[data.vibration])
     options.vibrate = vibrationPatterns[data.vibration];
@@ -129,11 +140,22 @@ self.addEventListener("notificationclick", (event) => {
   event.waitUntil(
     (async () => {
       if ("clearAppBadge" in navigator) await navigator.clearAppBadge();
+      const notificationData = event.notification.data || {};
+      const target = new URL(
+        typeof notificationData === "string" ? notificationData : notificationData.url || "./",
+        self.location.origin,
+      );
+      if (notificationData.assignmentId) target.searchParams.set("assignment", notificationData.assignmentId);
+      if (notificationData.taskId) target.searchParams.set("task", notificationData.taskId);
+      if (event.action) target.searchParams.set("notificationAction", event.action);
       return clients
         .matchAll({ type: "window", includeUncontrolled: true })
         .then((wins) => {
-        for (const w of wins) if ("focus" in w) return w.focus();
-        return clients.openWindow(event.notification.data || "./");
+        for (const w of wins) {
+          if ("navigate" in w) return w.navigate(target.href).then(() => w.focus());
+          if ("focus" in w) return w.focus();
+        }
+        return clients.openWindow(target.href);
         });
     })(),
   );

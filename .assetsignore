@@ -1,12 +1,14 @@
 .git/
 .github/
 .wrangler/
+.npmrc
 node_modules/
 tests/
 tests-runtime/
 migrations/
 worker.js
 power-worker.js
+reliability-worker.js
 auth.js
 auth-client-entry.js
 schema.sql
