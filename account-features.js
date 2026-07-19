@@ -99,7 +99,7 @@
       inviteList.querySelectorAll("[data-resend-invite]").forEach((button) => button.onclick = async () => { try { await request("/family/invites/resend", { method: "POST", body: JSON.stringify({ code: button.dataset.resendInvite }) }); toast("Invite resent", "A fresh email is on its way."); await loadInvitesAndActivity(); } catch (error) { toast("Could not resend", error.message); } });
       inviteList.querySelectorAll("[data-revoke-invite]").forEach((button) => button.onclick = async () => { if (!confirm("Revoke this invite?")) return; await request(`/family/invites/${encodeURIComponent(button.dataset.revokeInvite)}`, { method: "DELETE" }); await loadInvitesAndActivity(); });
       const activityList = byId("familyActivityList");
-      const actionText = { "invite-created": "created an invite", "invite-resent": "resent an invite", "invite-revoked": "revoked an invite", "member-joined": "joined the family", "member-left": "left the family" };
+      const actionText = { "invite-created": "created an invite", "invite-resent": "resent an invite", "invite-revoked": "revoked an invite", "member-joined": "joined the family", "member-left": "left the family", "event-created": "added a calendar event", "availability-changed": "updated availability", "chore-created": "created a rotating chore", "chore-assigned": "assigned a recurring chore", "assignment-seen": "saw a family task", "assignment-complete": "completed a family task", "assignment-snooze": "snoozed a family task" };
       activityList.innerHTML = activity.activity.length ? activity.activity.map((item) => `<div class="feature-row"><div><b>${safe(item.emoji)} ${safe(item.name)} ${safe(actionText[item.action] || item.action)}</b><small>${new Date(item.createdAt).toLocaleString()}</small></div></div>`).join("") : "<small>No family activity yet.</small>";
     } catch (error) { console.error("Family settings load failed", error); }
   }
@@ -131,10 +131,21 @@
     const restored = normalizeImport(JSON.parse(new TextDecoder().decode(plaintext)));
     Object.assign(db, restored); localStorage.setItem(KEY, JSON.stringify(db)); renderAll(); await syncToCloud(true); toast("Backup restored", "This device now uses the restored data.");
   }
+  async function verifyBackup(id) {
+    const encoded = localStorage.getItem(BACKUP_KEY) || prompt("Enter your Daysie backup recovery key");
+    if (!encoded) return;
+    await request(`/reliability/backups/${encodeURIComponent(id)}/verify`, { method: "POST", body: "{}" });
+    const data = await request(`/backups/${encodeURIComponent(id)}`);
+    const key = await crypto.subtle.importKey("raw", unbase64(encoded.trim()), "AES-GCM", false, ["decrypt"]);
+    const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unbase64(data.envelope.iv) }, key, unbase64(data.envelope.ciphertext));
+    const decoded = JSON.parse(new TextDecoder().decode(plaintext));
+    if (!decoded || !Array.isArray(decoded.profiles)) throw new Error("The backup decrypted but does not contain valid Daysie data.");
+    toast("Backup verified", "Cloud storage and local decryption both passed. Your current data was not changed.");
+  }
   async function loadBackups() {
     if (!settings.authToken) return;
     const list = byId("backupList");
-    try { const data = await request("/backups"); list.innerHTML = data.backups.length ? data.backups.map((backup) => `<div class="feature-row"><div><b>${new Date(backup.createdAt).toLocaleString()}</b><small>${Math.max(1, Math.round(backup.size / 1024))} KB · client-side encrypted</small></div><button class="text-button" data-restore-backup="${safe(backup.id)}">Restore</button></div>`).join("") : "<small>No encrypted backups yet.</small>"; list.querySelectorAll("[data-restore-backup]").forEach((button) => button.onclick = () => restoreBackup(button.dataset.restoreBackup).catch((error) => toast("Restore failed", error.message))); }
+    try { const data = await request("/backups"); list.innerHTML = data.backups.length ? data.backups.map((backup) => `<div class="feature-row"><div><b>${new Date(backup.createdAt).toLocaleString()}</b><small>${Math.max(1, Math.round(backup.size / 1024))} KB · client-side encrypted</small></div><div class="row-actions"><button class="text-button" data-verify-backup="${safe(backup.id)}">Verify</button><button class="text-button" data-restore-backup="${safe(backup.id)}">Restore</button></div></div>`).join("") : "<small>No encrypted backups yet.</small>"; list.querySelectorAll("[data-restore-backup]").forEach((button) => button.onclick = () => restoreBackup(button.dataset.restoreBackup).catch((error) => toast("Restore failed", error.message))); list.querySelectorAll("[data-verify-backup]").forEach((button) => button.onclick = () => verifyBackup(button.dataset.verifyBackup).catch((error) => toast("Verification failed", error.message))); }
     catch (error) { list.innerHTML = `<small>${safe(error.message)}</small>`; }
   }
   byId("enableBackupsBtn")?.addEventListener("click", async () => { await getBackupKey(true); byId("enableBackupsBtn").textContent = "Encrypted backups enabled"; await backupNow(); });
@@ -152,6 +163,10 @@
       byId("quietEnd").value = prefs.quietEnd || "07:00";
       byId("notificationTone").value = prefs.tone || "system";
       byId("notificationVibration").value = prefs.vibration || "system";
+      byId("digestMorning").checked = Boolean(prefs.digests?.morning);
+      byId("digestEvening").checked = Boolean(prefs.digests?.evening);
+      byId("digestWeekly").checked = Boolean(prefs.digests?.weekly);
+      byId("digestTime").value = prefs.digests?.time || "08:00";
       settings.notificationTone = prefs.tone || "system";
       settings.notificationVibration = prefs.vibration || "system";
       saveSettings();
@@ -169,7 +184,7 @@
     try {
       const tone = byId("notificationTone").value;
       const vibration = byId("notificationVibration").value;
-      await request("/notification-preferences", { method: "PUT", body: JSON.stringify({ quietStart: byId("quietStart").value, quietEnd: byId("quietEnd").value, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, tone, vibration, categories: { reminders: byId("notifyReminders").checked, family: byId("notifyFamily").checked, lists: byId("notifyLists").checked } }) });
+      await request("/notification-preferences", { method: "PUT", body: JSON.stringify({ quietStart: byId("quietStart").value, quietEnd: byId("quietEnd").value, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, tone, vibration, categories: { reminders: byId("notifyReminders").checked, family: byId("notifyFamily").checked, lists: byId("notifyLists").checked }, digests: { morning: byId("digestMorning").checked, evening: byId("digestEvening").checked, weekly: byId("digestWeekly").checked, time: byId("digestTime").value } }) });
       settings.notificationTone = tone;
       settings.notificationVibration = vibration;
       saveSettings();
@@ -184,6 +199,7 @@
   };
   async function loadPushStatus() {
     if (!settings.authToken) return;
+    if (window.loadDaysieNotificationDiagnostics) return window.loadDaysieNotificationDiagnostics();
     const list = byId("notificationDeviceList");
     try {
       const status = await request("/push/status");

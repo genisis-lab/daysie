@@ -26,6 +26,9 @@ Daysie is a beautiful, accessible reminder and journal app designed for **people
 - **Snooze** — Push a reminder back 10 minutes
 - **Multi-device push notifications** — Closed-app reminders reach every connected device, with delivery diagnostics and a built-in test
 - **Notification preferences** — Choose in-app tones, supported vibration patterns, quiet hours, and alert categories
+- **Notification reliability center** — Separate permission, install, account, push-service, device, and last-delivery checks
+- **Per-device controls** — Rename, pause, resume, or remove individual notification devices
+- **Action buttons and digests** — Complete or snooze supported notifications and opt into morning, evening, or weekly summaries
 - **PWA badges** — Supported devices show a badge for new reminders and clear it when Daysie is opened
 - **Re-nag alerts** — Overdue important tasks re-alert every 5 minutes (TickTick-style)
 
@@ -72,11 +75,17 @@ Daysie is a beautiful, accessible reminder and journal app designed for **people
 - **Cloud sync** — Your data syncs across all your devices (powered by Cloudflare D1)
 - **Real push notifications** — Get reminders even when the app is closed (when deployed with Cloudflare Worker)
 - **Privacy-first** — Synced data is access-controlled and scoped to your account; optional backup history is encrypted on your device before upload
+- **Safe account migration** — Existing local/device-code accounts move their notification, family, and sync history into Better Auth after sign-in
+- **Recovery-tested backups** — Verify the cloud envelope and decrypt a backup locally without replacing current data
 - **Works offline** — Local-first design means the app works without an account or internet
 
 ### 🏡 **Household Planning**
 - **Family dashboard and calendar** — See availability, upcoming events, assignments, and shared-list progress
 - **Task discussions** — Add family comments and quick reactions without introducing family roles
+- **Delivery receipts** — See whether an assigned family task reached the inbox/push service, was seen, or was completed
+- **Rotating chores** — Schedule daily, weekday, weekly, biweekly, or monthly chores across selected family members
+- **Shared availability &amp; DND** — Add a status note, an end time, and optionally pause family nudges
+- **Calendar transfer** — Import or export shared family events using standard `.ics` files
 - **Natural-language quick add** — Preview dates, assignees, importance, weekdays, and every-two-week schedules
 - **Smart grocery lists** — Parse quantity, unit, category, estimated price, and store from one line
 - **Reusable routines** — Save household checklists and turn them into scheduled reminders
@@ -142,11 +151,13 @@ daysie/
 ├── styles.css          # All styles (light/dark/high-contrast themes)
 ├── app.js              # App logic (tasks, journal, profiles, sync)
 ├── power-features.js   # Search, routines, trash, family dashboard, security UI
+├── reliability-features.js # Notification, receipt, chore, backup, and calendar UI
 ├── sw.js               # Service Worker (offline cache + push listener)
 ├── favicon.svg         # Daisy icon
 ├── site.webmanifest    # PWA manifest
 ├── worker.js           # Cloudflare Worker (auth + sync + scheduled push)
 ├── power-worker.js     # Focused account, history, family, storage, and metrics API
+├── reliability-worker.js # Durable migration, receipts, device controls, chores, and digests
 ├── schema.sql          # D1 database schema
 ├── wrangler.toml       # Worker configuration
 ├── DEPLOYMENT.md       # Cloud setup guide

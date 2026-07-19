@@ -126,7 +126,7 @@ let db = {
   renagTimer = null,
   assignee = null,
   pendingImport = null;
-const APP_VERSION = "2026.07.18-23";
+const APP_VERSION = "2026.07.18-25";
 let swRegistration = null,
   updateBannerShown = !1;
 const save = () => {

@@ -131,6 +131,10 @@ function getTurnstileToken(form) {
 }
 
 async function finishEmailAuth(result, email, isNewAccount) {
+  const legacyToken = settings.authProvider !== "better-auth" && settings.authToken
+    ? settings.authToken
+    : localStorage.getItem("daysie.pendingLegacyToken");
+  if (legacyToken) localStorage.setItem("daysie.pendingLegacyToken", legacyToken);
   const token =
     result.data?.token ||
     result.data?.data?.token ||
@@ -147,11 +151,20 @@ async function finishEmailAuth(result, email, isNewAccount) {
   authExpiredNoticeShown = false;
   const wasFirstRun = !db.onboarded;
   saveSettings();
+  let migration = null;
+  if (legacyToken && window.migrateDaysieLegacyAccount) {
+    try {
+      migration = await window.migrateDaysieLegacyAccount(legacyToken);
+    } catch (error) {
+      console.error("Could not migrate the previous device account", error);
+      toast("Account created", "You are signed in. Daysie will retry moving this device’s older cloud history.");
+    }
+  }
   updateAccountUI();
   updateSyncStatus();
   setAuthStatus("");
   toast("Welcome to Daysie", isNewAccount ? "Your account is ready." : "You’re signed in.");
-  if (isNewAccount) {
+  if (isNewAccount || migration?.needsClientSync) {
     if (wasFirstRun) {
       db.profiles[0].name = user.name || "friend";
       db.onboarded = true;
@@ -166,12 +179,29 @@ async function finishEmailAuth(result, email, isNewAccount) {
       localStorage.setItem(KEY, JSON.stringify(db));
     }
   }
+  if (migration?.legacyUserId) {
+    try {
+      const finalized = await daysieAuthenticatedFetch(`${API}/reliability/account/finalize-legacy`, {
+        method: "POST",
+        headers: authHeaders(true),
+        body: JSON.stringify({ legacyUserId: migration.legacyUserId }),
+      });
+      if (!finalized.ok) console.warn("Legacy account cleanup will be retried later");
+      else localStorage.removeItem("daysie.pendingLegacyMigrationId");
+    } catch (error) {
+      console.warn("Legacy account cleanup will be retried later", error);
+    }
+  }
   await joinPendingFamilyInvite();
   if (wasFirstRun) {
     showApp();
     if (!db.tourDone) setTimeout(startTour, 400);
   }
   $("#settingsDialog")?.close();
+  if (sessionStorage.getItem("daysie.returnAfterAuth") === "family") {
+    sessionStorage.removeItem("daysie.returnAfterAuth");
+    setTimeout(() => $("#profileBtn")?.click(), 80);
+  }
 }
 
 async function createFamilyInviteFromSettings(email = "") {
