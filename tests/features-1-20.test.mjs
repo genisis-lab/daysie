@@ -28,8 +28,11 @@ test("account flow includes Better Auth two-factor, passkey management, and lock
 
 test("sync conflicts merge records and keep restorable cloud history", () => {
   assert.match(app, /function mergeCloudPayload/);
-  assert.match(app, /toast\("Changes merged"/);
+  assert.doesNotMatch(app, /Changes merged/);
   assert.doesNotMatch(app, /Choose OK to keep this device's version/);
+  assert.doesNotMatch(app, /Choose sync version/);
+  assert.match(power, /syncHistoryVersions\.slice\(0, 5\)/);
+  assert.match(html, /id="showMoreSyncHistoryBtn"/);
   assert.match(powerWorker, /\/features\/sync\/history/);
   assert.match(powerWorker, /Restored revision/);
   assert.match(migration, /user_data_versions/);
