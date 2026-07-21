@@ -126,7 +126,7 @@ let db = {
   renagTimer = null,
   assignee = null,
   pendingImport = null;
-const APP_VERSION = "2026.07.18-25";
+const APP_VERSION = "2026.07.21-26";
 let swRegistration = null,
   updateBannerShown = !1;
 const save = () => {
@@ -448,6 +448,7 @@ function hideUpdateBanner() {
   ((updateBannerShown = !1), $("#updateBanner")?.classList.add("hidden"));
 }
 function showApp() {
+  document.body.classList.toggle("pwa-standalone", isStandalone());
   ($("#welcome").classList.add("hidden"),
     $("#app").classList.remove("hidden"),
     $("#tabs").classList.remove("hidden"),
@@ -1695,9 +1696,7 @@ function updateSyncStatus() {
           ? "☁️ Changes waiting"
           : settings.syncState === "syncing"
             ? "☁️ Syncing…"
-            : settings.syncState === "conflict"
-              ? "⚠️ Choose sync version"
-              : "☁️ Synced"))
+            : "☁️ Synced"))
     : $("#syncStatus").classList.add("hidden");
 }
 function updateAccountUI() {
@@ -1945,7 +1944,7 @@ async function syncToCloud(force = false) {
       });
       const result = await response.json().catch(() => ({}));
       if (response.status === 409 && result.conflict) {
-        settings.syncState = "conflict";
+        settings.syncState = "syncing";
         settings.syncPending = true;
         saveSettings();
         updateSyncStatus();
@@ -1959,7 +1958,6 @@ async function syncToCloud(force = false) {
         localStorage.setItem(KEY, JSON.stringify(db));
         saveSettings();
         renderAll();
-        toast("Changes merged", "Daysie combined updates from this device and the cloud. You can undo from Sync history.");
         setTimeout(() => syncToCloud(true), 0);
         return;
       }

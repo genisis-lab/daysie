@@ -264,7 +264,7 @@
 
       <!-- INSIGHTS -->
       <section id="insightsView" class="view hidden">
-        <h2>🌈 Your insights</h2>
+        <h2>✨ Your insights</h2>
         <div id="stats" class="stats"></div>
         <article class="card">
           <h2>😊 Mood this week</h2>
@@ -308,7 +308,7 @@
       <button data-tab="tasks">⏰<span>Tasks</span></button>
       <button data-tab="calendar">📅<span>Calendar</span></button>
       <button data-tab="journal">📖<span>Journal</span></button>
-      <button data-tab="insights">🌈<span>Insights</span></button>
+      <button data-tab="insights">✨<span>Insights</span></button>
     </nav>
 
     <!-- TASK DIALOG -->
@@ -860,8 +860,11 @@
             </section>
             <section class="settings-feature-card" aria-labelledby="syncHistoryTitle">
               <div class="feature-heading"><span>🕘</span><div><b id="syncHistoryTitle">Sync history &amp; undo</b><small>Daysie automatically merges changes and keeps the latest 20 cloud versions.</small></div></div>
-              <div id="syncHistoryList" class="feature-list"><small>Loading history…</small></div>
-              <button type="button" id="refreshSyncHistoryBtn" class="text-button">Refresh history</button>
+              <div id="syncHistoryList" class="feature-list" aria-live="polite"><small>Loading history…</small></div>
+              <div class="sync-history-actions">
+                <button type="button" id="refreshSyncHistoryBtn" class="text-button">Refresh history</button>
+                <button type="button" id="showMoreSyncHistoryBtn" class="text-button hidden" aria-expanded="false" aria-controls="syncHistoryList">Show more</button>
+              </div>
             </section>
             <section class="settings-feature-card" aria-labelledby="securityActivityTitle">
               <div class="feature-heading"><span>🔎</span><div><b id="securityActivityTitle">Security activity</b><small>Review recent sign-ins, account changes, and protective checks.</small></div></div>

@@ -41,6 +41,8 @@
   let twoFactorUri = "";
   let familyDashboard = null;
   let searchKind = "all";
+  let syncHistoryVersions = [];
+  let syncHistoryExpanded = false;
   const sentMetrics = new Set();
 
   function captureReplacementToken(result) {
@@ -201,39 +203,58 @@
   });
   byId("addPasskeyBtn")?.addEventListener("click", () => setTimeout(loadAccountProtection, 1600));
 
+  function renderSyncHistory() {
+    const list = byId("syncHistoryList");
+    const showMore = byId("showMoreSyncHistoryBtn");
+    if (!list) return;
+    const visibleVersions = syncHistoryExpanded ? syncHistoryVersions : syncHistoryVersions.slice(0, 5);
+    list.innerHTML = visibleVersions.length
+      ? visibleVersions
+          .map(
+            (version) => `<div class="feature-row"><div><b>Revision ${version.revision}</b><small>${safe(version.source)} · ${dateTime(version.createdAt)} · ${bytes(version.size)}</small></div><button type="button" class="text-button" data-restore-version="${safe(version.id)}">Restore</button></div>`,
+          )
+          .join("")
+      : "<small>Your first cloud version will appear after the next sync.</small>";
+    if (showMore) {
+      const hiddenCount = Math.max(0, syncHistoryVersions.length - 5);
+      showMore.classList.toggle("hidden", hiddenCount === 0);
+      showMore.textContent = syncHistoryExpanded ? "Show latest 5" : `Show more (${hiddenCount})`;
+      showMore.setAttribute("aria-expanded", String(syncHistoryExpanded));
+    }
+    list.querySelectorAll("[data-restore-version]").forEach((button) => {
+      button.onclick = async () => {
+        if (!confirm("Restore this cloud version? Daysie will keep your current version in history.")) return;
+        try {
+          const restored = await featureRequest(
+            `/features/sync/history/${encodeURIComponent(button.dataset.restoreVersion)}/restore`,
+            { method: "POST", body: "{}" },
+          );
+          applyCloudPayload({ ...restored.data, _sync: { revision: restored.revision, updatedAt: Date.now() } });
+          await loadSyncHistory();
+          toast("Cloud version restored", "Your previous state is available in history if you change your mind.");
+        } catch (error) {
+          toast("Could not restore version", error.message);
+        }
+      };
+    });
+  }
+
   async function loadSyncHistory() {
     const list = byId("syncHistoryList");
     if (!settings.authToken || !list) return;
     try {
       const data = await featureRequest("/features/sync/history");
-      list.innerHTML = data.versions.length
-        ? data.versions
-            .map(
-              (version) => `<div class="feature-row"><div><b>Revision ${version.revision}</b><small>${safe(version.source)} · ${dateTime(version.createdAt)} · ${bytes(version.size)}</small></div><button type="button" class="text-button" data-restore-version="${safe(version.id)}">Restore</button></div>`,
-            )
-            .join("")
-        : "<small>Your first cloud version will appear after the next sync.</small>";
-      list.querySelectorAll("[data-restore-version]").forEach((button) => {
-        button.onclick = async () => {
-          if (!confirm("Restore this cloud version? Daysie will keep your current version in history.")) return;
-          try {
-            const restored = await featureRequest(
-              `/features/sync/history/${encodeURIComponent(button.dataset.restoreVersion)}/restore`,
-              { method: "POST", body: "{}" },
-            );
-            applyCloudPayload({ ...restored.data, _sync: { revision: restored.revision, updatedAt: Date.now() } });
-            await loadSyncHistory();
-            toast("Cloud version restored", "Your previous state is available in history if you change your mind.");
-          } catch (error) {
-            toast("Could not restore version", error.message);
-          }
-        };
-      });
+      syncHistoryVersions = Array.isArray(data.versions) ? data.versions : [];
+      renderSyncHistory();
     } catch (error) {
       list.innerHTML = `<small>${safe(error.message)}</small>`;
     }
   }
   byId("refreshSyncHistoryBtn")?.addEventListener("click", loadSyncHistory);
+  byId("showMoreSyncHistoryBtn")?.addEventListener("click", () => {
+    syncHistoryExpanded = !syncHistoryExpanded;
+    renderSyncHistory();
+  });
 
   async function loadSecurityActivity() {
     const list = byId("securityActivityList");
