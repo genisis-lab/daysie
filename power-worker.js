@@ -21,8 +21,32 @@ async function familyFor(env, userId) {
     .first();
 }
 
-async function bodyOf(request) {
-  return request.json().catch(() => ({}));
+async function bodyOf(request, limit = 64 * 1024) {
+  const declared = Number(request.headers.get("Content-Length") || 0);
+  if (declared > limit)
+    throw Object.assign(new Error("Request body is too large"), { status: 413 });
+  if (!request.body) return {};
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let size = 0;
+  let raw = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      try { await reader.cancel(); } catch {}
+      throw Object.assign(new Error("Request body is too large"), { status: 413 });
+    }
+    raw += decoder.decode(value, { stream: true });
+  }
+  raw += decoder.decode();
+  if (!raw.trim()) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw Object.assign(new Error("Request body must be valid JSON"), { status: 400 });
+  }
 }
 
 async function addActivity(env, familyId, userId, action, details) {

@@ -12,7 +12,33 @@ const reply = (value, status, headers) =>
 const changed = (result) =>
   Number(result?.meta?.changes || result?.meta?.rows_written || 0) > 0;
 
-const parseBody = (request) => request.json().catch(() => ({}));
+async function parseBody(request, limit = 64 * 1024) {
+  const declared = Number(request.headers.get("Content-Length") || 0);
+  if (declared > limit)
+    throw Object.assign(new Error("Request body is too large"), { status: 413 });
+  if (!request.body) return {};
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let size = 0;
+  let raw = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      try { await reader.cancel(); } catch {}
+      throw Object.assign(new Error("Request body is too large"), { status: 413 });
+    }
+    raw += decoder.decode(value, { stream: true });
+  }
+  raw += decoder.decode();
+  if (!raw.trim()) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw Object.assign(new Error("Request body must be valid JSON"), { status: 400 });
+  }
+}
 
 function validTimezone(value) {
   try {
@@ -187,7 +213,7 @@ export async function handleReliabilityRequest({ request, env, userId, corsHeade
 
   if (path === "/reliability/notifications/diagnostics" && request.method === "GET") {
     const [devices, preferences, session] = await Promise.all([
-      env.DB.prepare("SELECT id, endpoint, device_name, user_agent, enabled, created_at, updated_at, last_success_at, last_failure_at, last_status FROM push_subscriptions WHERE user_id = ? ORDER BY updated_at DESC").bind(userId).all(),
+      env.DB.prepare("SELECT id, device_name, enabled, created_at, updated_at, last_success_at, last_failure_at, last_status FROM push_subscriptions WHERE user_id = ? ORDER BY updated_at DESC").bind(userId).all(),
       env.DB.prepare("SELECT quiet_start, quiet_end, timezone, digest_morning, digest_evening, digest_weekly, digest_time FROM notification_preferences WHERE user_id = ?").bind(userId).first(),
       env.DB.prepare('SELECT CASE WHEN EXISTS(SELECT 1 FROM "session" WHERE userId = ?) THEN 1 ELSE 0 END AS better_auth').bind(userId).first(),
     ]);
@@ -198,7 +224,7 @@ export async function handleReliabilityRequest({ request, env, userId, corsHeade
       pushConfigured: Boolean(env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY),
       preferences: preferences || null,
       devices: (devices.results || []).map((row) => ({
-        id: row.id, endpoint: row.endpoint, name: row.device_name || "Daysie device", enabled: row.enabled !== 0,
+        id: row.id, name: row.device_name || "Daysie device", enabled: row.enabled !== 0,
         createdAt: row.created_at, updatedAt: row.updated_at,
         lastSuccessAt: row.last_success_at, lastFailureAt: row.last_failure_at,
         lastStatus: row.last_status,

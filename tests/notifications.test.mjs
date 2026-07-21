@@ -35,8 +35,8 @@ test("expired PWA sessions recover or ask the user to sign in again", () => {
   assert.match(app, /response\.status !== 401/);
   assert.match(account, /Your session expired\. Sign in again/);
   assert.match(family, /familyApiFetch/);
-  assert.match(worker, /legacyGrace = 14 \* 24 \* 60 \* 60 \* 1000/);
-  assert.match(worker, /UPDATE sessions SET expires = \? WHERE token = \?/);
+  assert.match(worker, /a\.expires >= n/);
+  assert.doesNotMatch(worker, /legacyGrace/);
 });
 
 test("family assignments report push delivery separately from inbox delivery", () => {
