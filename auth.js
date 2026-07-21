@@ -36,7 +36,10 @@ export async function sendDaysieEmail(env, message) {
       },
       { apiKey: env.BETTER_AUTH_API_KEY },
     );
-    if (!result.success) throw new Error(result.error || "Email delivery failed.");
+    if (!result.success) {
+      console.error("Better Auth email service rejected a message");
+      throw new Error("Email delivery failed.");
+    }
     return;
   }
   if (!env.RESEND_API_KEY || !env.EMAIL_FROM) {
@@ -58,15 +61,14 @@ export async function sendDaysieEmail(env, message) {
   });
 
   if (!response.ok) {
-    const details = await response.text();
-    throw new Error(`Email provider returned ${response.status}: ${details.slice(0, 240)}`);
+    console.error("Email provider rejected a message", { status: response.status });
+    throw new Error("Email delivery failed.");
   }
 }
 
 export function createDaysieAuth(env, request, executionContext) {
   const requestUrl = new URL(request.url);
   const appOrigin = cleanOrigin(env.APP_URL);
-  const requestOrigin = cleanOrigin(request.headers.get("Origin"));
   const trustedOrigins = [
     appOrigin,
     "http://localhost:8787",
@@ -89,8 +91,7 @@ export function createDaysieAuth(env, request, executionContext) {
           enabled: true,
           minPasswordLength: 8,
           sendResetPassword: async ({ user, token }) => {
-            const resetOrigin = appOrigin || requestOrigin;
-            if (!resetOrigin) throw new Error("APP_URL must be configured for password resets.");
+            const resetOrigin = appOrigin || "https://daysie.pages.dev";
             const resetUrl = `${resetOrigin}/?resetToken=${encodeURIComponent(token)}`;
             const emailPromise = sendDaysieEmail(env, {
               to: user.email,

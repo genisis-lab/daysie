@@ -37,6 +37,28 @@ describe("Daysie Worker runtime", () => {
     expect(health.ok).toBe(true);
     expect(health.storage).toEqual({ d1: true, photos: true });
     expect(health.services.passkeys).toBe(true);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("content-security-policy")).toContain("default-src 'none'");
+  });
+
+  it("rejects requests from untrusted browser origins", async () => {
+    const response = await SELF.fetch("https://daysie.test/health", {
+      headers: { Origin: "https://evil.example" },
+    });
+    expect(response.status).toBe(403);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await response.json()).toEqual({ error: "Origin not allowed" });
+  });
+
+  it("rejects oversized JSON bodies before route processing", async () => {
+    const response = await SELF.fetch("https://daysie.test/pair/redeem", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: "ABC123", padding: "x".repeat(5_000) }),
+    });
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: "Request body is too large" });
   });
 
   it("requires authentication before reading or writing sync data", async () => {
@@ -119,7 +141,7 @@ describe("Daysie Worker runtime", () => {
     });
   });
 
-  it("renews a recently expired legacy PWA session without changing identity", async () => {
+  it("rejects an expired legacy PWA session without silently renewing it", async () => {
     const userId = crypto.randomUUID();
     const token = crypto.randomUUID();
     const expiredAt = Date.now() - 5 * 24 * 60 * 60 * 1000;
@@ -130,9 +152,44 @@ describe("Daysie Worker runtime", () => {
     const response = await SELF.fetch("https://daysie.test/push/status", {
       headers: { Authorization: `Bearer ${token}` },
     });
-    expect(response.status).toBe(200);
-    const renewed = await env.DB.prepare("SELECT expires FROM sessions WHERE token = ?").bind(token).first();
-    expect(renewed.expires).toBeGreaterThan(Date.now() + 29 * 24 * 60 * 60 * 1000);
+    expect(response.status).toBe(401);
+    const stored = await env.DB.prepare("SELECT expires FROM sessions WHERE token = ?").bind(token).first();
+    expect(stored.expires).toBe(expiredAt);
+  });
+
+  it("rejects active-content image uploads", async () => {
+    const userId = crypto.randomUUID();
+    const token = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO users (id, created_at) VALUES (?, ?)").bind(userId, Date.now()),
+      env.DB.prepare("INSERT INTO sessions (token, user_id, expires) VALUES (?, ?, ?)").bind(token, userId, Date.now() + 60_000),
+    ]);
+    const response = await SELF.fetch("https://daysie.test/photo", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "image/svg+xml" },
+      body: '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+    });
+    expect(response.status).toBe(415);
+    expect(await response.json()).toEqual({ error: "Unsupported image format" });
+  });
+
+  it("rejects malformed Web Push key material", async () => {
+    const userId = crypto.randomUUID();
+    const token = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO users (id, created_at) VALUES (?, ?)").bind(userId, Date.now()),
+      env.DB.prepare("INSERT INTO sessions (token, user_id, expires) VALUES (?, ?, ?)").bind(token, userId, Date.now() + 60_000),
+    ]);
+    const response = await SELF.fetch("https://daysie.test/push/subscribe", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        endpoint: `https://web.push.apple.com/${crypto.randomUUID()}`,
+        keys: { p256dh: "x", auth: "y" },
+      }),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Invalid push subscription" });
   });
 
   it("delivers a family task to the recipient inbox even without push", async () => {
@@ -165,6 +222,15 @@ describe("Daysie Worker runtime", () => {
       success: true,
       delivery: { attempted: 0, sent: 0, failed: 0 },
     });
+
+    const invalidAck = await SELF.fetch("https://daysie.test/family/inbox/ack", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${recipientToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ id: assigned.id, status: "admin" }),
+    });
+    expect(invalidAck.status).toBe(400);
+    const unchanged = await env.DB.prepare("SELECT status FROM assigned_items WHERE id = ?").bind(assigned.id).first();
+    expect(unchanged.status).toBe("pending");
 
     const inbox = await SELF.fetch("https://daysie.test/family/inbox", {
       headers: { Authorization: `Bearer ${recipientToken}` },
@@ -289,5 +355,21 @@ describe("Daysie Worker runtime", () => {
     expect(member.user_id).toBe(accountId);
     const data = await env.DB.prepare("SELECT user_id FROM user_data WHERE user_id = ?").bind(accountId).first();
     expect(data.user_id).toBe(accountId);
+  });
+
+  it("does not expose internal exception details", async () => {
+    const userId = crypto.randomUUID();
+    const token = crypto.randomUUID();
+    const now = Date.now();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO users (id, created_at) VALUES (?, ?)").bind(userId, now),
+      env.DB.prepare("INSERT INTO sessions (token, user_id, expires) VALUES (?, ?, ?)").bind(token, userId, now + 60_000),
+      env.DB.prepare("INSERT INTO user_data (user_id, data, updated_at, revision) VALUES (?, ?, ?, 1)").bind(userId, "{not-json", now),
+    ]);
+    const response = await SELF.fetch("https://daysie.test/data", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "Internal server error" });
   });
 });
