@@ -224,8 +224,8 @@ test("push subscriptions validate callback destinations before storage or fetch"
     "worker must define a push endpoint allowlist",
   );
   assert.ok(
-    worker.includes("Invalid push endpoint"),
-    "subscribe route must reject invalid endpoints",
+    worker.includes("Invalid push subscription"),
+    "subscribe route must reject invalid endpoints or key material",
   );
 });
 
