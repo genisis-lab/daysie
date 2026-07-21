@@ -13,28 +13,59 @@ export default {
   async fetch(e, E, executionContext) {
     const p = new URL(e.url).pathname,
       requestOrigin = e.headers.get("Origin"),
-      allowedOrigins = new Set([String(E.APP_URL || "").replace(/\/$/, ""), "http://localhost:4173", "http://localhost:8787", "http://localhost:3000"]),
-      corsOrigin = requestOrigin && allowedOrigins.has(requestOrigin) ? requestOrigin : String(E.APP_URL || "https://daysie.pages.dev").replace(/\/$/, ""),
+      appOrigin = String(E.APP_URL || "https://daysie.pages.dev").replace(/\/$/, ""),
+      allowedOrigins = new Set([appOrigin, "http://localhost:4173", "http://localhost:8787", "http://localhost:3000"].filter(Boolean)),
+      securityHeaders = {
+        "Cache-Control": "no-store",
+        "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; sandbox",
+        "Referrer-Policy": "no-referrer",
+        "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+      },
+      corsOrigin = requestOrigin || appOrigin,
       m = {
+        ...securityHeaders,
         "Access-Control-Allow-Origin": corsOrigin,
         "Access-Control-Allow-Credentials": "true",
         Vary: "Origin",
         "Access-Control-Allow-Methods": "GET, POST, DELETE, PUT, PATCH, OPTIONS",
-        "Access-Control-Allow-Headers":
-          "Content-Type, Authorization, X-Daysie-Legacy-Token",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
         "Access-Control-Expose-Headers": "set-auth-token",
       };
-    if ("OPTIONS" === e.method) return new Response(null, { headers: m });
+    if (requestOrigin && !allowedOrigins.has(requestOrigin))
+      return c({ error: "Origin not allowed" }, 403, securityHeaders);
+    const declaredLength = Number(e.headers.get("Content-Length") || 0);
+    const routeLimit = p === "/photo" ? 8 * 1024 * 1024 : p.startsWith("/api/auth/") ? 256 * 1024 : 1536 * 1024;
+    if (declaredLength > routeLimit)
+      return c({ error: "Request body is too large" }, 413, m);
+    if ("OPTIONS" === e.method) return new Response(null, { status: 204, headers: m });
     try {
       if (p.startsWith("/api/auth/")) {
         let authRequest = e;
+        let authPayload = null;
+        if ("GET" !== e.method && "HEAD" !== e.method && (e.headers.get("Content-Type") || "").includes("application/json")) {
+          authPayload = await q(e, 256 * 1024);
+          authRequest = new Request(e.url, {
+            method: e.method,
+            headers: e.headers,
+            body: JSON.stringify(authPayload),
+          });
+        } else if ("GET" !== e.method && "HEAD" !== e.method) {
+          const authBody = await readBoundedBody(e, 256 * 1024);
+          authRequest = new Request(e.url, {
+            method: e.method,
+            headers: e.headers,
+            body: authBody,
+          });
+        }
         if (
           "POST" === e.method &&
           ("/api/auth/sign-in/email" === p ||
             "/api/auth/sign-in/username" === p ||
             "/api/auth/sign-up/email" === p)
         ) {
-          const payload = await e.json().catch(() => ({}));
+          const payload = authPayload || {};
           const turnstileToken = String(payload.turnstileToken || "");
           if (!turnstileToken)
             return c({ error: "Complete the security check" }, 400, m);
@@ -157,7 +188,7 @@ export default {
             429,
             m,
           );
-        const { code: i } = await e.json(),
+        const { code: i } = await q(e, 4096),
           t = (i || "").trim().toUpperCase();
         if (!t) return c({ error: "Missing code" }, 400, m);
         const a = await E.DB.prepare("SELECT * FROM pair_codes WHERE code = ?")
@@ -202,7 +233,7 @@ export default {
       if ("/pair/approve" === p && "POST" === e.method) {
         const i = await r(e, E);
         if (!i) return c({ error: "Unauthorized" }, 401, m);
-        const { code: t } = await e.json(),
+        const { code: t } = await q(e, 4096),
           a = (t || "").trim().toUpperCase(),
           n = await E.DB.prepare(
             "SELECT * FROM pair_codes WHERE code = ? AND user_id = ? AND redeemed = 1 AND approved = 0 AND redeem_nonce IS NOT NULL",
@@ -223,7 +254,7 @@ export default {
       if ("/pair/deny" === p && "POST" === e.method) {
         const i = await r(e, E);
         if (!i) return c({ error: "Unauthorized" }, 401, m);
-        const { code: t } = await e.json(),
+        const { code: t } = await q(e, 4096),
           a = (t || "").trim().toUpperCase();
         return (
           await E.DB.prepare(
@@ -235,7 +266,7 @@ export default {
         );
       }
       if ("/pair/status" === p && "POST" === e.method) {
-        const { code: r, nonce: a } = await e.json(),
+        const { code: r, nonce: a } = await q(e, 4096),
           i = (r || "").trim().toUpperCase(),
           n = String(a || ""),
           t = await E.DB.prepare(
@@ -318,7 +349,7 @@ export default {
       if ("/data" === p && "POST" === e.method) {
         const i = await r(e, E);
         if (!i) return c({ error: "Unauthorized" }, 401, m);
-        const t = await e.json();
+        const t = await q(e, 1100 * 1024);
         const baseRevision = Number(t._baseRevision || 0);
         const force = t._force === true;
         const syncSource = d(t._source, 80) || "Daysie device";
@@ -397,7 +428,7 @@ export default {
       if ("/account/sessions/name" === p && "POST" === e.method) {
         const userId = await r(e, E);
         if (!userId) return c({ error: "Unauthorized" }, 401, m);
-        const body = await e.json();
+        const body = await q(e, 16 * 1024);
         const sessionId = String(body.sessionId || "");
         const name = d(body.name, 48);
         if (!sessionId || !name) return c({ error: "Device and name are required" }, 400, m);
@@ -437,7 +468,7 @@ export default {
       if ("/account/recover" === p && "POST" === e.method) {
         const ip = e.headers.get("CF-Connecting-IP") || "unknown";
         if (!(await u(E, `recover:${ip}`, 8, 15 * 60 * 1000))) return c({ error: "Too many attempts. Try again later." }, 429, m);
-        const body = await e.json();
+        const body = await q(e, 16 * 1024);
         const email = String(body.email || "").trim().toLowerCase();
         const codeHash = await sha256(String(body.code || "").trim().toUpperCase());
         const user = await E.DB.prepare(`SELECT id, email, name, username FROM "user" WHERE lower(email) = ?`).bind(email).first();
@@ -461,7 +492,7 @@ export default {
       if ("/notification-preferences" === p && "PUT" === e.method) {
         const userId = await r(e, E);
         if (!userId) return c({ error: "Unauthorized" }, 401, m);
-        const body = await e.json();
+        const body = await q(e, 32 * 1024);
         const timezone = validTimezone(body.timezone) ? body.timezone : "UTC";
         const timePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
         const quietStart = timePattern.test(body.quietStart || "") ? body.quietStart : null;
@@ -482,7 +513,7 @@ export default {
       if ("/backups" === p && "POST" === e.method) {
         const userId = await r(e, E);
         if (!userId) return c({ error: "Unauthorized" }, 401, m);
-        const body = await e.json();
+        const body = await q(e, 1280 * 1024);
         const envelope = JSON.stringify(body.envelope || {});
         if (envelope.length > 1200000) return c({ error: "Backup is too large" }, 413, m);
         const id = crypto.randomUUID();
@@ -506,7 +537,7 @@ export default {
       if ("/account/delete" === p && "POST" === e.method) {
         const userId = await r(e, E);
         if (!userId) return c({ error: "Unauthorized" }, 401, m);
-        const body = await e.json();
+        const body = await q(e, 16 * 1024);
         try {
           const verified = await createDaysieAuth(E, e).api.verifyPassword({ body: { password: String(body.password || "") }, headers: e.headers });
           if (!verified?.status) return c({ error: "Password is incorrect" }, 403, m);
@@ -545,10 +576,10 @@ export default {
       if ("/push/subscribe" === p && "POST" === e.method) {
         const userId = await r(e, E);
         if (!userId) return c({ error: "Unauthorized" }, 401, m);
-        const body = await e.json();
+        const body = await q(e, 16 * 1024);
         const subscription = body.subscription || body;
-        if (!isSafePushEndpoint(subscription))
-          return c({ error: "Invalid push endpoint" }, 400, m);
+        if (!isValidPushSubscription(subscription))
+          return c({ error: "Invalid push subscription" }, 400, m);
         const now = Date.now();
         const endpoint = String(subscription.endpoint);
         const deviceName = d(body.deviceName, 48) || friendlyDeviceName(e.headers.get("User-Agent"));
@@ -603,16 +634,28 @@ export default {
         if (!i) return c({ error: "Unauthorized" }, 401, m);
         if (!E.PHOTOS)
           return c({ error: "Photo storage not configured" }, 503, m);
-        const t = e.headers.get("Content-Type") || "image/jpeg";
-        if (!/^image\//.test(t))
-          return c({ error: "Only images can be uploaded" }, 415, m);
-        const a = Number(e.headers.get("Content-Length") || 0);
-        if (!a || a > 8388608)
-          return c({ error: "Photo too large (max 8 MB)" }, 413, m);
+        const t = String(e.headers.get("Content-Type") || "image/jpeg")
+          .split(";", 1)[0]
+          .trim()
+          .toLowerCase();
+        const safeImageTypes = new Set([
+          "image/jpeg",
+          "image/png",
+          "image/webp",
+          "image/gif",
+          "image/avif",
+          "image/heic",
+          "image/heif",
+        ]);
+        if (!safeImageTypes.has(t))
+          return c({ error: "Unsupported image format" }, 415, m);
+        const photoBody = await readBoundedBody(e, 8 * 1024 * 1024);
+        if (!photoBody.byteLength)
+          return c({ error: "Photo is empty" }, 400, m);
         const n = `${i}/${crypto.randomUUID()}`,
           s = crypto.randomUUID();
         return (
-          await E.PHOTOS.put(n, e.body, { httpMetadata: { contentType: t } }),
+          await E.PHOTOS.put(n, photoBody, { httpMetadata: { contentType: t } }),
           await E.DB.prepare(
             "INSERT OR REPLACE INTO photo_access (key, user_id, token, created_at) VALUES (?, ?, ?, ?)",
           )
@@ -748,7 +791,7 @@ export default {
       if ("/family/profile" === p && "POST" === e.method) {
         const i = await r(e, E);
         if (!i) return c({ error: "Unauthorized" }, 401, m);
-        const { name: a, emoji: n, color: s } = await e.json(),
+        const { name: a, emoji: n, color: s } = await q(e, 16 * 1024),
           o = await t(E, i, a, n, s);
         return (
           await E.DB.prepare(
@@ -770,7 +813,7 @@ export default {
         const userId = await r(e, E);
         if (!userId) return c({ error: "Unauthorized" }, 401, m);
         if (!(await u(E, `finvite:${userId}`, 8, 36e5))) return c({ error: "Too many invitations. Please wait before trying again." }, 429, m);
-        const body = await e.json();
+        const body = await q(e, 16 * 1024);
         const code = String(body.code || "").trim().toUpperCase();
         const invite = await E.DB.prepare("SELECT i.*, m.name FROM family_invites i LEFT JOIN family_members m ON m.user_id = i.inviter_user_id WHERE i.code = ? AND i.inviter_user_id = ?").bind(code, userId).first();
         if (!invite) return c({ error: "Invite not found" }, 404, m);
@@ -803,7 +846,7 @@ export default {
       if ("/family/invite" === p && "POST" === e.method) {
         const i = await r(e, E);
         if (!i) return c({ error: "Unauthorized" }, 401, m);
-        const a = await e.json().catch(() => ({})),
+        const a = await q(e, 32 * 1024),
           n = await t(E, i, a.name, a.emoji, a.color);
         const inviteEmail = String(a.email || "").trim().toLowerCase();
         if (
@@ -860,8 +903,7 @@ export default {
               ...familyInviteEmail({
                 appUrl:
                   String(E.APP_URL || "").replace(/\/$/, "") ||
-                  e.headers.get("Origin") ||
-                  new URL(e.url).origin,
+                  "https://daysie.pages.dev",
                 code: s,
                 inviterName: d(a.name, 40) || "A family member",
                 inviteeEmail: inviteEmail,
@@ -896,7 +938,7 @@ export default {
           );
         const t = await r(e, E);
         if (!t) return c({ error: "Unauthorized" }, 401, m);
-        const { code: a, name: n, emoji: s, color: o } = await e.json(),
+        const { code: a, name: n, emoji: s, color: o } = await q(e, 16 * 1024),
           p = (a || "").trim().toUpperCase();
         if (!p) return c({ error: "Missing code" }, 400, m);
         const f = await E.DB.prepare(
@@ -1036,7 +1078,7 @@ export default {
           name: n,
           emoji: s,
           color: o,
-        } = await e.json().catch(() => ({}));
+        } = await q(e, 16 * 1024);
         if (!a) return c({ error: "Missing familyId" }, 400, m);
         if (
           !(await E.DB.prepare(
@@ -1101,7 +1143,7 @@ export default {
           .bind(i)
           .first();
         if (!t) return c({ error: "Not in a family" }, 400, m);
-        const { lists: a, action: s } = await e.json();
+        const { lists: a, action: s } = await q(e, 600 * 1024);
         if (JSON.stringify(a || []).length > 512e3)
           return c({ error: "Lists too large to sync" }, 413, m);
         const o = Date.now(),
@@ -1172,7 +1214,7 @@ export default {
           .bind(i)
           .first();
         if (!t) return c({ error: "Not in a family" }, 400, m);
-        const { toUser: n, task: s } = await e.json();
+        const { toUser: n, task: s } = await q(e, 32 * 1024);
         if (
           !(await E.DB.prepare(
             "SELECT user_id FROM family_members WHERE user_id = ? AND family_id = ?",
@@ -1181,8 +1223,18 @@ export default {
             .first())
         )
           return c({ error: "Member not found" }, 404, m);
-        const o = crypto.randomUUID(),
-          d = Date.now();
+        const task = {
+            title: d(s?.title, 120) || "New task",
+            note: d(s?.note, 1000),
+            due: Number.isFinite(Number(s?.due)) ? Number(s.due) : null,
+            priority: ["low", "med", "high"].includes(String(s?.priority))
+              ? String(s.priority)
+              : "low",
+            category: h(s?.category) ? String(s.category) : "none",
+          },
+          payload = JSON.stringify(task),
+          o = crypto.randomUUID(),
+          createdAt = Date.now();
         await E.DB.prepare(
           "INSERT INTO assigned_items (id, family_id, from_user, to_user, kind, payload, fire_at, status, notified, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
@@ -1192,11 +1244,11 @@ export default {
             i,
             n,
             "task",
-            JSON.stringify(s || {}),
-            d,
+            payload,
+            createdAt,
             "pending",
             0,
-            d,
+            createdAt,
           )
           .run();
         const delivery = await a(E, {
@@ -1204,7 +1256,7 @@ export default {
           to_user: n,
           from_user: i,
           kind: "task",
-          payload: JSON.stringify(s || {}),
+          payload,
         });
         return c({ success: true, id: o, delivery }, 200, m);
       }
@@ -1217,7 +1269,7 @@ export default {
           .bind(i)
           .first();
         if (!t) return c({ error: "Not in a family" }, 400, m);
-        const { toUser: n, title: s, fireAt: o } = await e.json();
+        const { toUser: n, title: s, fireAt: o } = await q(e, 16 * 1024);
         if (
           !(await E.DB.prepare(
             "SELECT user_id FROM family_members WHERE user_id = ? AND family_id = ?",
@@ -1226,25 +1278,26 @@ export default {
             .first())
         )
           return c({ error: "Member not found" }, 404, m);
-        const d = crypto.randomUUID(),
+        const assignmentId = crypto.randomUUID(),
           u = Date.now(),
-          p = o && o > u ? o : u,
-          f = JSON.stringify({ title: s || "Reminder" });
+          requestedTime = Number(o),
+          p = Number.isFinite(requestedTime) && requestedTime > u ? requestedTime : u,
+          f = JSON.stringify({ title: d(s, 120) || "Reminder" });
         await E.DB.prepare(
           "INSERT INTO assigned_items (id, family_id, from_user, to_user, kind, payload, fire_at, status, notified, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
-          .bind(d, t.family_id, i, n, "reminder", f, p, "pending", 0, u)
+          .bind(assignmentId, t.family_id, i, n, "reminder", f, p, "pending", 0, u)
           .run();
         const delivery = p <= u
           ? await a(E, {
-              id: d,
+              id: assignmentId,
               to_user: n,
               from_user: i,
               kind: "reminder",
               payload: f,
             })
           : { attempted: 0, sent: 0, failed: 0, scheduled: true };
-        return c({ success: true, id: d, delivery }, 200, m);
+        return c({ success: true, id: assignmentId, delivery }, 200, m);
       }
       if ("/family/inbox" === p && "GET" === e.method) {
         const i = await r(e, E);
@@ -1280,9 +1333,12 @@ export default {
       if ("/family/inbox/ack" === p && "POST" === e.method) {
         const i = await r(e, E);
         if (!i) return c({ error: "Unauthorized" }, 401, m);
-        const { id: t, status: a } = await e.json();
-        const status = a || "done",
-          now = Date.now();
+        const { id: t, status: a } = await q(e, 4096);
+        const status = a || "done";
+        if (!["seen", "done"].includes(status))
+          return c({ error: "Invalid assignment status" }, 400, m);
+        if (!h(t)) return c({ error: "Invalid assignment id" }, 400, m);
+        const now = Date.now();
         await E.DB.prepare(
           "UPDATE assigned_items SET status = ?, seen_at = COALESCE(seen_at, ?), completed_at = CASE WHEN ? = 'done' THEN ? ELSE completed_at END WHERE id = ? AND to_user = ?",
         ).bind(status, now, status, now, t, i).run();
@@ -1312,7 +1368,11 @@ export default {
     } catch (e) {
       return (
         console.error("Worker error:", e),
-        c({ error: e.message || "Internal server error" }, 500, m)
+        c(
+          { error: e?.status >= 400 && e?.status < 500 ? e.message : "Internal server error" },
+          e?.status >= 400 && e?.status < 500 ? e.status : 500,
+          m,
+        )
       );
     }
   },
@@ -1378,10 +1438,9 @@ async function r(e, r) {
       .first();
   if (a) {
     const now = Date.now(),
-      legacyGrace = 14 * 24 * 60 * 60 * 1000,
       legacyTtl = 30 * 24 * 60 * 60 * 1000,
       renewalWindow = 7 * 24 * 60 * 60 * 1000;
-    if (a.expires >= now - legacyGrace) {
+    if (a.expires >= now) {
       if (a.expires < now + renewalWindow)
         await r.DB.prepare("UPDATE sessions SET expires = ? WHERE token = ?")
           .bind(now + legacyTtl, t)
@@ -1724,24 +1783,52 @@ function v(e, r) {
   } catch (e) {}
 }
 async function u(e, r, i, t) {
-  const a = Date.now(),
-    n = await e.DB.prepare("SELECT count, reset FROM rate_limits WHERE k = ?")
-      .bind(r)
-      .first();
-  return !n || n.reset < a
-    ? (await e.DB.prepare(
-        "INSERT OR REPLACE INTO rate_limits (k, count, reset) VALUES (?, ?, ?)",
-      )
-        .bind(r, 1, a + t)
-        .run(),
-      !0)
-    : !(n.count >= i) &&
-        (await e.DB.prepare(
-          "UPDATE rate_limits SET count = count + 1 WHERE k = ?",
-        )
-          .bind(r)
-          .run(),
-        !0);
+  const now = Date.now();
+  const result = await e.DB.prepare(
+    `INSERT INTO rate_limits (k, count, reset) VALUES (?, 1, ?)
+     ON CONFLICT(k) DO UPDATE SET
+       count = CASE WHEN rate_limits.reset < ? THEN 1 ELSE rate_limits.count + 1 END,
+       reset = CASE WHEN rate_limits.reset < ? THEN excluded.reset ELSE rate_limits.reset END
+     RETURNING count`,
+  ).bind(r, now + t, now, now).first();
+  return Number(result?.count || 0) <= i;
+}
+
+async function q(request, limit = 256 * 1024) {
+  const body = await readBoundedBody(request, limit);
+  if (!body.byteLength) return {};
+  const raw = new TextDecoder().decode(body);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw Object.assign(new Error("Request body must be valid JSON"), { status: 400 });
+  }
+}
+
+async function readBoundedBody(request, limit) {
+  const declared = Number(request.headers.get("Content-Length") || 0);
+  if (declared > limit) throw Object.assign(new Error("Request body is too large"), { status: 413 });
+  if (!request.body) return new Uint8Array();
+  const reader = request.body.getReader();
+  const chunks = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      try { await reader.cancel(); } catch {}
+      throw Object.assign(new Error("Request body is too large"), { status: 413 });
+    }
+    chunks.push(value);
+  }
+  const body = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
 }
 function c(e, r = 200, i = {}) {
   return new Response(JSON.stringify(e), {
@@ -1787,6 +1874,21 @@ function isSafePushEndpoint(e) {
   } catch (e) {
     return !1;
   }
+}
+function isValidPushSubscription(subscription) {
+  if (!isSafePushEndpoint(subscription)) return false;
+  const p256dh = String(subscription?.keys?.p256dh || "");
+  const auth = String(subscription?.keys?.auth || "");
+  const base64url = /^[A-Za-z0-9_-]+$/;
+  return (
+    base64url.test(p256dh) &&
+    p256dh.length >= 40 &&
+    p256dh.length <= 160 &&
+    base64url.test(auth) &&
+    auth.length >= 8 &&
+    auth.length <= 64 &&
+    JSON.stringify(subscription).length <= 4096
+  );
 }
 function g(e) {
   return !!(
@@ -1877,8 +1979,8 @@ async function w(e, r, i) {
         console.error("Push send error: VAPID_PRIVATE_KEY secret is not set"),
         0
       );
-    if (!isSafePushEndpoint(r))
-      return (console.error("Push send error: invalid push endpoint"), 0);
+    if (!isValidPushSubscription(r))
+      return (console.error("Push send error: invalid push subscription"), 0);
     const t = r.endpoint,
       a = new URL(t).origin,
       n = await _(e, a),

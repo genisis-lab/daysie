@@ -1,7 +1,7 @@
 # Cloudflare Worker configuration for Daysie
 name = "daysie-api"
 main = "worker.js"
-compatibility_date = "2026-07-18"
+compatibility_date = "2026-07-21"
 compatibility_flags = ["nodejs_compat"]
 
 # D1 Database binding

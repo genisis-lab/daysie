@@ -1,6 +1,6 @@
 name = "daysie-api-test"
 main = "worker.js"
-compatibility_date = "2026-07-18"
+compatibility_date = "2026-07-21"
 compatibility_flags = ["nodejs_compat"]
 
 [[d1_databases]]
