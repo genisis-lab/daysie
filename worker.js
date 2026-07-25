@@ -13,7 +13,7 @@ export default {
   async fetch(e, E, executionContext) {
     const p = new URL(e.url).pathname,
       requestOrigin = e.headers.get("Origin"),
-      appOrigin = String(E.APP_URL || "https://daysie.pages.dev").replace(/\/$/, ""),
+      appOrigin = String(E.APP_URL || "https://daysie.builtwai.com").replace(/\/$/, ""),
       allowedOrigins = new Set([appOrigin, "http://localhost:4173", "http://localhost:8787", "http://localhost:3000"].filter(Boolean)),
       securityHeaders = {
         "Cache-Control": "no-store",
@@ -820,7 +820,7 @@ export default {
         if (!invite.invited_email) return c({ error: "This code-only invite has no email address" }, 400, m);
         const expirationMinutes = Math.max(15, Math.min(10080, Math.round((invite.expires - invite.created) / 60000) || 1440));
         const expires = Date.now() + expirationMinutes * 60 * 1000;
-        await sendDaysieEmail(E, { to: invite.invited_email, ...familyInviteEmail({ appUrl: String(E.APP_URL || "https://daysie.pages.dev").replace(/\/$/, ""), code, inviterName: invite.name || "A family member", inviteeEmail: invite.invited_email, expirationMinutes }) });
+        await sendDaysieEmail(E, { to: invite.invited_email, ...familyInviteEmail({ appUrl: String(E.APP_URL || "https://daysie.builtwai.com").replace(/\/$/, ""), code, inviterName: invite.name || "A family member", inviteeEmail: invite.invited_email, expirationMinutes }) });
         await E.DB.prepare("UPDATE family_invites SET expires = ? WHERE code = ?").bind(expires, code).run();
         await logFamilyActivity(E, invite.family_id, userId, "invite-resent", { email: invite.invited_email });
         return c({ success: true, expires }, 200, m);
@@ -903,7 +903,7 @@ export default {
               ...familyInviteEmail({
                 appUrl:
                   String(E.APP_URL || "").replace(/\/$/, "") ||
-                  "https://daysie.pages.dev",
+                  "https://daysie.builtwai.com",
                 code: s,
                 inviterName: d(a.name, 40) || "A family member",
                 inviteeEmail: inviteEmail,
