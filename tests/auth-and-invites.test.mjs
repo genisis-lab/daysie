@@ -25,6 +25,17 @@ test("Better Auth is mounted with D1, email/password, and bearer sessions", () =
   assert.match(schema, /username TEXT/);
 });
 
+test("custom and legacy domains are explicit auth origins with origin-bound passkeys", () => {
+  assert.match(wrangler, /APP_URL = "https:\/\/daysie\.builtwai\.com"/);
+  assert.match(wrangler, /LEGACY_APP_URL = "https:\/\/daysie\.pages\.dev"/);
+  assert.match(auth, /DEFAULT_APP_ORIGIN = "https:\/\/daysie\.builtwai\.com"/);
+  assert.match(auth, /cleanOrigin\(env\.LEGACY_APP_URL\)/);
+  assert.match(auth, /requestOrigin && origins\.includes\(requestOrigin\)/);
+  assert.match(auth, /rpID: new URL\(origin\)\.hostname/);
+  assert.match(auth, /origin: passkeyConfig\.origins/);
+  assert.doesNotMatch(auth, /trustedOrigins = \[[\s\S]*localhost/);
+});
+
 test("settings provides accessible sign-in, sign-up, reset, and family email invite forms", () => {
   for (const id of [
     "signInForm",
@@ -71,6 +82,9 @@ test("Turnstile protects sign-in and sign-up through the managed verification Wo
   assert.match(authUi, /window\.turnstile\.render/);
   assert.match(authUi, /settingsDialog"\)\?\.open/);
   assert.match(authUi, /form\.offsetParent === null/);
+  assert.match(authUi, /"error-callback"/);
+  assert.match(authUi, /not configured for this domain yet/);
+  assert.match(authUi, /"expired-callback"/);
 });
 
 test("family invitations can be delivered by email without removing code invites", () => {

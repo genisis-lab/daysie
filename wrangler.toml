@@ -15,7 +15,8 @@ binding = "PHOTOS"
 bucket_name = "daysie-photos"
 
 [vars]
-APP_URL = "https://daysie.pages.dev"
+APP_URL = "https://daysie.builtwai.com"
+LEGACY_APP_URL = "https://daysie.pages.dev"
 TURNSTILE_VERIFY_URL = "https://turnstile-siteverify-daysie.neil27.workers.dev/"
 
 # Native Worker-to-Worker connection. Calling another workers.dev service with
@@ -40,4 +41,6 @@ head_sampling_rate = 1
 # BETTER_AUTH_API_KEY - Preferred transactional email provider
 # RESEND_API_KEY - Optional fallback for password resets and family invitations
 # EMAIL_FROM - A verified sender, e.g. "Daysie <hello@yourdomain.com>"
-# APP_URL - Public frontend origin, e.g. "https://daysie.pages.dev"
+# APP_URL - Canonical public frontend origin, e.g. "https://daysie.builtwai.com"
+# LEGACY_APP_URL - Optional transition origin for an older Pages hostname
+# ALLOW_LOCAL_AUTH - Set only in local/test environments when localhost auth is needed

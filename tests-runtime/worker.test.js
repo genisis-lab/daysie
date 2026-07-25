@@ -1,6 +1,7 @@
 import { SELF, env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import worker from "../worker.js";
+import { createDaysieAuth } from "../auth.js";
 import { nextOccurrence, zonedParts } from "../reliability-worker.js";
 
 beforeAll(async () => {
@@ -8,8 +9,11 @@ beforeAll(async () => {
     CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT, created_at INTEGER);
     CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS rate_limits (k TEXT PRIMARY KEY, count INTEGER NOT NULL, reset INTEGER NOT NULL);
-    CREATE TABLE IF NOT EXISTS "user" (id TEXT PRIMARY KEY, email TEXT, name TEXT, username TEXT);
-    CREATE TABLE IF NOT EXISTS "session" (id TEXT PRIMARY KEY, userId TEXT, token TEXT, expiresAt INTEGER);
+    CREATE TABLE IF NOT EXISTS "user" (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, emailVerified INTEGER NOT NULL DEFAULT 0, twoFactorEnabled INTEGER NOT NULL DEFAULT 0, username TEXT, displayUsername TEXT, image TEXT, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS "session" (id TEXT PRIMARY KEY NOT NULL, expiresAt INTEGER NOT NULL, token TEXT NOT NULL UNIQUE, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, ipAddress TEXT, userAgent TEXT, userId TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE);
+    CREATE TABLE IF NOT EXISTS account (id TEXT PRIMARY KEY NOT NULL, accountId TEXT NOT NULL, providerId TEXT NOT NULL, userId TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE, accessToken TEXT, refreshToken TEXT, idToken TEXT, accessTokenExpiresAt INTEGER, refreshTokenExpiresAt INTEGER, scope TEXT, password TEXT, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS verification (id TEXT PRIMARY KEY NOT NULL, identifier TEXT NOT NULL, value TEXT NOT NULL, expiresAt INTEGER NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS "twoFactor" (id TEXT PRIMARY KEY NOT NULL, secret TEXT NOT NULL, backupCodes TEXT NOT NULL, userId TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE, verified INTEGER NOT NULL DEFAULT 1, failedVerificationCount INTEGER NOT NULL DEFAULT 0, lockedUntil INTEGER);
     CREATE TABLE IF NOT EXISTS family_members (family_id TEXT, user_id TEXT PRIMARY KEY, name TEXT, emoji TEXT, color TEXT, joined INTEGER, availability TEXT DEFAULT 'free', availability_until INTEGER, availability_note TEXT, dnd_until INTEGER);
     CREATE TABLE IF NOT EXISTS family_invites (code TEXT PRIMARY KEY, family_id TEXT, created INTEGER, expires INTEGER, invited_email TEXT, inviter_user_id TEXT);
     CREATE TABLE IF NOT EXISTS family_activity (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, user_id TEXT NOT NULL, action TEXT NOT NULL, details TEXT, created_at INTEGER NOT NULL);
@@ -28,6 +32,46 @@ beforeAll(async () => {
     CREATE TABLE IF NOT EXISTS backup_verifications (backup_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, envelope_hash TEXT NOT NULL, verified_at INTEGER NOT NULL);
   `);
 });
+
+const cookieHeader = (response) =>
+  response.headers
+    .getSetCookie()
+    .map((value) => value.split(";", 1)[0])
+    .join("; ");
+
+const base32Bytes = (value) => {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  let bits = "";
+  for (const character of String(value).replace(/=+$/, "").toUpperCase())
+    bits += alphabet.indexOf(character).toString(2).padStart(5, "0");
+  const bytes = [];
+  for (let index = 0; index + 8 <= bits.length; index += 8)
+    bytes.push(Number.parseInt(bits.slice(index, index + 8), 2));
+  return new Uint8Array(bytes);
+};
+
+async function currentTotp(uri) {
+  const parsed = new URL(uri);
+  const key = await crypto.subtle.importKey(
+    "raw",
+    base32Bytes(parsed.searchParams.get("secret")),
+    { name: "HMAC", hash: "SHA-1" },
+    false,
+    ["sign"],
+  );
+  const counter = Math.floor(Date.now() / 30_000);
+  const message = new Uint8Array(8);
+  new DataView(message.buffer).setBigUint64(0, BigInt(counter));
+  const digest = new Uint8Array(await crypto.subtle.sign("HMAC", key, message));
+  const offset = digest[digest.length - 1] & 15;
+  const code = (
+    ((digest[offset] & 127) << 24) |
+    (digest[offset + 1] << 16) |
+    (digest[offset + 2] << 8) |
+    digest[offset + 3]
+  ) % 1_000_000;
+  return String(code).padStart(6, "0");
+}
 
 describe("Daysie Worker runtime", () => {
   it("boots in the Workers runtime and reports bound storage", async () => {
@@ -49,6 +93,20 @@ describe("Daysie Worker runtime", () => {
     expect(response.status).toBe(403);
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
     expect(await response.json()).toEqual({ error: "Origin not allowed" });
+  });
+
+  it("accepts the canonical and legacy frontend origins", async () => {
+    for (const origin of [
+      "https://daysie.builtwai.com",
+      "https://daysie.pages.dev",
+    ]) {
+      const response = await SELF.fetch("https://daysie.test/health", {
+        headers: { Origin: origin },
+      });
+      expect(response.status, origin).toBe(200);
+      expect(response.headers.get("access-control-allow-origin"), origin).toBe(origin);
+      expect(response.headers.get("access-control-allow-credentials"), origin).toBe("true");
+    }
   });
 
   it("rejects oversized JSON bodies before route processing", async () => {
@@ -75,11 +133,76 @@ describe("Daysie Worker runtime", () => {
   it("rejects password sign-in before auth when Turnstile is missing", async () => {
     const response = await SELF.fetch("https://daysie.test/api/auth/sign-in/email", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Origin: "https://daysie.pages.dev" },
+      headers: { "Content-Type": "application/json", Origin: "https://daysie.builtwai.com" },
       body: JSON.stringify({ email: "test@example.com", password: "password123" }),
     });
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "Complete the security check" });
+  });
+
+  it("supports account creation, password sign-in, and the complete 2FA challenge on the custom domain", async () => {
+    const origin = "https://daysie.builtwai.com";
+    const email = `domain-auth-${crypto.randomUUID()}@example.com`;
+    const password = "Domain-auth-test-123!";
+    const username = `user_${crypto.randomUUID().replace(/-/g, "").slice(0, 18)}`;
+    const authRequest = (path, body, cookie = "") =>
+      new Request(`https://daysie-api.neil27.workers.dev/api/auth${path}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Origin: origin,
+          ...(cookie ? { Cookie: cookie } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+
+    const signUpRequest = authRequest("/sign-up/email", {
+      name: "Domain Auth Test",
+      username,
+      email,
+      password,
+    });
+    const signUp = await createDaysieAuth(env, signUpRequest).handler(signUpRequest);
+    expect(signUp.status).toBe(200);
+    expect(await signUp.clone().json()).toMatchObject({ user: { email } });
+    const accountCookie = cookieHeader(signUp);
+    expect(accountCookie).toContain("session");
+
+    const enableRequest = authRequest("/two-factor/enable", {
+      password,
+      issuer: "Daysie",
+    }, accountCookie);
+    const enabled = await createDaysieAuth(env, enableRequest).handler(enableRequest);
+    expect(enabled.status).toBe(200);
+    const setup = await enabled.json();
+    expect(setup.totpURI).toMatch(/^otpauth:\/\/totp\//);
+    expect(setup.backupCodes.length).toBeGreaterThan(0);
+
+    const confirmRequest = authRequest("/two-factor/verify-totp", {
+      code: await currentTotp(setup.totpURI),
+      trustDevice: false,
+    }, accountCookie);
+    const confirmed = await createDaysieAuth(env, confirmRequest).handler(confirmRequest);
+    expect(confirmed.status).toBe(200);
+
+    const signInRequest = authRequest("/sign-in/email", {
+      email,
+      password,
+      rememberMe: true,
+    });
+    const signIn = await createDaysieAuth(env, signInRequest).handler(signInRequest);
+    expect(signIn.status).toBe(200);
+    expect(await signIn.clone().json()).toMatchObject({ twoFactorRedirect: true });
+    const challengeCookie = cookieHeader(signIn);
+    expect(challengeCookie).toContain("two_factor");
+
+    const verifyRequest = authRequest("/two-factor/verify-totp", {
+      code: await currentTotp(setup.totpURI),
+      trustDevice: true,
+    }, challengeCookie);
+    const verified = await createDaysieAuth(env, verifyRequest).handler(verifyRequest);
+    expect(verified.status).toBe(200);
+    expect(await verified.json()).toMatchObject({ user: { email } });
   });
 
   it("protects all feature-suite account and family endpoints", async () => {
@@ -338,7 +461,7 @@ describe("Daysie Worker runtime", () => {
     await env.DB.batch([
       env.DB.prepare("INSERT INTO users (id, created_at) VALUES (?, ?)").bind(legacyId, now),
       env.DB.prepare("INSERT INTO users (id, created_at) VALUES (?, ?)").bind(accountId, now),
-      env.DB.prepare('INSERT INTO "user" (id, email, name) VALUES (?, ?, ?)').bind(accountId, "claim@example.com", "Claim"),
+      env.DB.prepare('INSERT INTO "user" (id, email, name, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)').bind(accountId, "claim@example.com", "Claim", now, now),
       env.DB.prepare("INSERT INTO sessions (token, user_id, expires) VALUES (?, ?, ?)").bind(legacyToken, legacyId, now + 60_000),
       env.DB.prepare("INSERT INTO sessions (token, user_id, expires) VALUES (?, ?, ?)").bind(accountToken, accountId, now + 60_000),
       env.DB.prepare("INSERT INTO family_members (family_id, user_id, name, joined) VALUES (?, ?, 'Legacy', ?)").bind(familyId, legacyId, now),
