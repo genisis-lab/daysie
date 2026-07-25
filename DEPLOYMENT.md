@@ -70,8 +70,11 @@ npx wrangler secret put EMAIL_FROM
 ```
 
 - `EMAIL_FROM`: a verified sender such as `Daysie <hello@yourdomain.com>`
-- `APP_URL`: the public frontend origin. This non-secret value is configured in
-  `wrangler.toml` as `https://daysie.pages.dev`.
+- `APP_URL`: the canonical public frontend origin. This non-secret value is
+  configured in `wrangler.toml` as `https://daysie.builtwai.com`.
+- `LEGACY_APP_URL`: the previous Pages origin, currently
+  `https://daysie.pages.dev`, retained during the migration so password and
+  2FA sign-in keep working there.
 
 Never put API keys or sender credentials directly in `wrangler.toml` or commit
 them to Git.
@@ -81,11 +84,18 @@ soon as email/password sign-up succeeds.
 
 ### Turnstile protection
 
-The sign-in and sign-up forms use the managed Turnstile widget registered for
-`daysie.pages.dev`, `localhost`, and `127.0.0.1`. The public widget key is safe
-to keep in `index.html`. The `daysie-api` Worker validates every submitted
-token through the managed `turnstile-siteverify-daysie` Worker before invoking
-Better Auth; direct requests without a valid token are rejected.
+The sign-in and sign-up forms use a managed Turnstile widget. Its hostname
+allowlist must include `daysie.builtwai.com`, `daysie.pages.dev`, `localhost`,
+and `127.0.0.1`. The public widget key is safe to keep in `index.html`. The
+`daysie-api` Worker validates every submitted token through the managed
+`turnstile-siteverify-daysie` Worker before invoking Better Auth; direct
+requests without a valid token are rejected.
+
+WebAuthn passkeys are bound to the site domain. Password and 2FA accounts
+continue to work on both approved origins, but a passkey created for
+`daysie.pages.dev` cannot be reused on `daysie.builtwai.com`. After signing in
+with a password and 2FA on the custom domain, add a new passkey there. Existing
+passkeys remain usable on the old Pages origin during the transition.
 
 ### Step 5: Generate VAPID Keys (for Web Push)
 

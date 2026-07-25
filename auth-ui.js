@@ -19,6 +19,17 @@ function renderTurnstile(form) {
     action: widget.dataset.action,
     theme: widget.dataset.theme || "auto",
     appearance: widget.dataset.appearance || "always",
+    "error-callback": (errorCode) => {
+      const message =
+        String(errorCode) === "110200"
+          ? "The security check is not configured for this domain yet."
+          : "The security check could not load. Refresh and try again.";
+      console.error("Turnstile could not render:", errorCode);
+      setAuthStatus(message, true);
+    },
+    "expired-callback": () => {
+      setAuthStatus("The security check expired. Complete it again.", true);
+    },
   });
   turnstileWidgets.set(widget, widgetId);
   return true;
