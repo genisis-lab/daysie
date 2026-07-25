@@ -75,7 +75,7 @@ describe("Daysie Worker runtime", () => {
   it("rejects password sign-in before auth when Turnstile is missing", async () => {
     const response = await SELF.fetch("https://daysie.test/api/auth/sign-in/email", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Origin: "https://daysie.pages.dev" },
+      headers: { "Content-Type": "application/json", Origin: "https://daysie.builtwai.com" },
       body: JSON.stringify({ email: "test@example.com", password: "password123" }),
     });
     expect(response.status).toBe(400);

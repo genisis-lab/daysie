@@ -71,7 +71,7 @@ npx wrangler secret put EMAIL_FROM
 
 - `EMAIL_FROM`: a verified sender such as `Daysie <hello@yourdomain.com>`
 - `APP_URL`: the public frontend origin. This non-secret value is configured in
-  `wrangler.toml` as `https://daysie.pages.dev`.
+  `wrangler.toml` as `https://daysie.builtwai.com`.
 
 Never put API keys or sender credentials directly in `wrangler.toml` or commit
 them to Git.
@@ -82,10 +82,15 @@ soon as email/password sign-up succeeds.
 ### Turnstile protection
 
 The sign-in and sign-up forms use the managed Turnstile widget registered for
-`daysie.pages.dev`, `localhost`, and `127.0.0.1`. The public widget key is safe
+`daysie.builtwai.com`, `localhost`, and `127.0.0.1`. The public widget key is safe
 to keep in `index.html`. The `daysie-api` Worker validates every submitted
 token through the managed `turnstile-siteverify-daysie` Worker before invoking
 Better Auth; direct requests without a valid token are rejected.
+
+Configure an account-level Cloudflare Bulk Redirect from `daysie.pages.dev` to
+`https://daysie.builtwai.com` with query strings and path suffixes preserved. This
+keeps new sessions, passkeys, local storage, reset links, and family invitations
+on the canonical origin instead of splitting browser state between two sites.
 
 ### Step 5: Generate VAPID Keys (for Web Push)
 

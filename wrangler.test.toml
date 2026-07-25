@@ -13,5 +13,5 @@ binding = "PHOTOS"
 bucket_name = "daysie-test-photos"
 
 [vars]
-APP_URL = "https://daysie.pages.dev"
+APP_URL = "https://daysie.builtwai.com"
 BETTER_AUTH_SECRET = "test-only-secret-that-is-long-enough-123456"
