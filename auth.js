@@ -12,6 +12,36 @@ const cleanOrigin = (value) => {
   }
 };
 
+export const DEFAULT_APP_ORIGIN = "https://daysie.builtwai.com";
+
+export function daysieOrigins(env = {}) {
+  const origins = [
+    cleanOrigin(env.APP_URL) || DEFAULT_APP_ORIGIN,
+    cleanOrigin(env.LEGACY_APP_URL),
+  ];
+  if (String(env.ALLOW_LOCAL_AUTH || "").toLowerCase() === "true") {
+    origins.push(
+      "http://localhost:4173",
+      "http://localhost:8787",
+      "http://localhost:3000",
+    );
+  }
+  return [...new Set(origins.filter(Boolean))];
+}
+
+export function daysiePasskeyConfig(env, request) {
+  const origins = daysieOrigins(env);
+  const requestOrigin = cleanOrigin(request?.headers?.get("Origin"));
+  const origin = requestOrigin && origins.includes(requestOrigin)
+    ? requestOrigin
+    : origins[0];
+  return {
+    origin,
+    origins,
+    rpID: new URL(origin).hostname,
+  };
+}
+
 const escapeHtml = (value) =>
   String(value || "").replace(
     /[&<>"']/g,
@@ -68,12 +98,9 @@ export async function sendDaysieEmail(env, message) {
 
 export function createDaysieAuth(env, request, executionContext) {
   const requestUrl = new URL(request.url);
-  const appOrigin = cleanOrigin(env.APP_URL);
-  const trustedOrigins = [
-    appOrigin,
-    "http://localhost:8787",
-    "http://localhost:3000",
-  ].filter(Boolean);
+  const trustedOrigins = daysieOrigins(env);
+  const appOrigin = trustedOrigins[0];
+  const passkeyConfig = daysiePasskeyConfig(env, request);
 
   return betterAuth({
     baseURL: requestUrl.origin,
@@ -136,9 +163,9 @@ export function createDaysieAuth(env, request, executionContext) {
             },
           }),
           passkey({
-            rpID: new URL(appOrigin || "https://daysie.builtwai.com").hostname,
+            rpID: passkeyConfig.rpID,
             rpName: "Daysie",
-            origin: appOrigin || "https://daysie.builtwai.com",
+            origin: passkeyConfig.origins,
           }),
           username({
             minUsernameLength: 3,

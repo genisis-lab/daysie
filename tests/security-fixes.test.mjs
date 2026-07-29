@@ -253,12 +253,17 @@ test("production authentication uses the custom Daysie origin", () => {
   );
   assert.match(
     auth,
-    /https:\/\/daysie\.builtwai\.com/,
-    "Better Auth and passkeys should fall back to the custom domain",
+    /DEFAULT_APP_ORIGIN = "https:\/\/daysie\.builtwai\.com"/,
+    "Better Auth should fall back to the custom domain",
   );
-  assert.doesNotMatch(
-    `${auth}\n${worker}\n${wrangler}`,
-    /https:\/\/daysie\.pages\.dev/,
-    "Production code must not generate links or trust the legacy Pages origin",
+  assert.match(
+    worker,
+    /appOrigin = appOrigins\[0\]/,
+    "Generated links should use the canonical origin, not the transition origin",
+  );
+  assert.match(
+    wrangler,
+    /LEGACY_APP_URL = "https:\/\/daysie\.pages\.dev"/,
+    "The legacy Pages origin should remain an explicit transition-only origin",
   );
 });
