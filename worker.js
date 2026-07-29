@@ -903,8 +903,7 @@ export default {
             await sendDaysieEmail(E, {
               to: inviteEmail,
               ...familyInviteEmail({
-                appUrl:
-                  appOrigin,
+                appUrl: appOrigin,
                 code: s,
                 inviterName: d(a.name, 40) || "A family member",
                 inviteeEmail: inviteEmail,

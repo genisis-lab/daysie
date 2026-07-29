@@ -118,7 +118,7 @@ export function createDaysieAuth(env, request, executionContext) {
           enabled: true,
           minPasswordLength: 8,
           sendResetPassword: async ({ user, token }) => {
-            const resetOrigin = appOrigin || "https://daysie.pages.dev";
+            const resetOrigin = appOrigin || "https://daysie.builtwai.com";
             const resetUrl = `${resetOrigin}/?resetToken=${encodeURIComponent(token)}`;
             const emailPromise = sendDaysieEmail(env, {
               to: user.email,
