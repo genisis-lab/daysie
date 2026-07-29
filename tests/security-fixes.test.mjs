@@ -240,3 +240,30 @@ test("Cloudflare Pages security headers are configured", () => {
     "Cloudflare Pages headers should enable HSTS",
   );
 });
+
+test("production authentication uses the custom Daysie origin", () => {
+  const auth = read("auth.js");
+  const worker = read("worker.js");
+  const wrangler = read("wrangler.toml");
+
+  assert.match(
+    wrangler,
+    /APP_URL = "https:\/\/daysie\.builtwai\.com"/,
+    "Worker configuration should use the custom domain as APP_URL",
+  );
+  assert.match(
+    auth,
+    /DEFAULT_APP_ORIGIN = "https:\/\/daysie\.builtwai\.com"/,
+    "Better Auth should fall back to the custom domain",
+  );
+  assert.match(
+    worker,
+    /appOrigin = appOrigins\[0\]/,
+    "Generated links should use the canonical origin, not the transition origin",
+  );
+  assert.match(
+    wrangler,
+    /LEGACY_APP_URL = "https:\/\/daysie\.pages\.dev"/,
+    "The legacy Pages origin should remain an explicit transition-only origin",
+  );
+});

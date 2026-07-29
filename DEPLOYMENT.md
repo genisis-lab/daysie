@@ -97,6 +97,11 @@ continue to work on both approved origins, but a passkey created for
 with a password and 2FA on the custom domain, add a new passkey there. Existing
 passkeys remain usable on the old Pages origin during the transition.
 
+Configure an account-level Cloudflare Bulk Redirect from `daysie.pages.dev` to
+`https://daysie.builtwai.com` with query strings and path suffixes preserved. This
+keeps new sessions, passkeys, local storage, reset links, and family invitations
+on the canonical origin instead of splitting browser state between two sites.
+
 ### Step 5: Generate VAPID Keys (for Web Push)
 
 ```bash
