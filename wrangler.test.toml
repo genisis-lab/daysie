@@ -14,4 +14,6 @@ bucket_name = "daysie-test-photos"
 
 [vars]
 APP_URL = "https://daysie.builtwai.com"
+LEGACY_APP_URL = "https://daysie.pages.dev"
+ALLOW_LOCAL_AUTH = "true"
 BETTER_AUTH_SECRET = "test-only-secret-that-is-long-enough-123456"
