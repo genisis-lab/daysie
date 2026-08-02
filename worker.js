@@ -9,6 +9,20 @@ import {
   handleReliabilityRequest,
   runReliabilitySchedule,
 } from "./reliability-worker.js";
+import { WorkflowEntrypoint } from "cloudflare:workers";
+
+export class AssignmentLifecycleWorkflow extends WorkflowEntrypoint {
+  async run(event, step) {
+    const assignmentId = String(event.payload?.assignmentId || "");
+    const fireAt = Number(event.payload?.fireAt || 0);
+    if (!h(assignmentId) || !Number.isFinite(fireAt)) return;
+    if (fireAt > Date.now())
+      await step.sleepUntil("wait-until-assignment-is-due", new Date(fireAt));
+    await step.do("enqueue-due-assignment", async () => {
+      await this.env.NOTIFICATION_QUEUE.send({ type: "assigned-item", assignmentId });
+    });
+  }
+}
 
 export default {
   async fetch(e, E, executionContext) {
@@ -1251,13 +1265,7 @@ export default {
             createdAt,
           )
           .run();
-        const delivery = await a(E, {
-          id: o,
-          to_user: n,
-          from_user: i,
-          kind: "task",
-          payload,
-        });
+        const delivery = await scheduleAssignedItem(E, o, createdAt);
         return c({ success: true, id: o, delivery }, 200, m);
       }
       if ("/family/remind" === p && "POST" === e.method) {
@@ -1288,15 +1296,7 @@ export default {
         )
           .bind(assignmentId, t.family_id, i, n, "reminder", f, p, "pending", 0, u)
           .run();
-        const delivery = p <= u
-          ? await a(E, {
-              id: assignmentId,
-              to_user: n,
-              from_user: i,
-              kind: "reminder",
-              payload: f,
-            })
-          : { attempted: 0, sent: 0, failed: 0, scheduled: true };
+        const delivery = await scheduleAssignedItem(E, assignmentId, p);
         return c({ success: true, id: assignmentId, delivery }, 200, m);
       }
       if ("/family/inbox" === p && "GET" === e.method) {
@@ -1426,7 +1426,71 @@ export default {
       console.error("Scheduled push error:", e);
     }
   },
+  async queue(batch, env) {
+    for (const message of batch.messages) {
+      const assignmentId = String(message.body?.assignmentId || "");
+      if (message.body?.type !== "assigned-item" || !h(assignmentId)) {
+        message.ack();
+        continue;
+      }
+      try {
+        const item = await env.DB.prepare(
+          "SELECT id, to_user, from_user, kind, payload, fire_at, status, notified FROM assigned_items WHERE id = ?",
+        ).bind(assignmentId).first();
+        if (!item || item.notified || item.status !== "pending") {
+          message.ack();
+          continue;
+        }
+        const delaySeconds = Math.ceil((Number(item.fire_at) - Date.now()) / 1000);
+        if (delaySeconds > 0) {
+          message.retry({ delaySeconds: Math.min(delaySeconds, 12 * 60 * 60) });
+          continue;
+        }
+        const delivery = await a(env, item);
+        if (delivery.failed > 0 && delivery.sent === 0) {
+          message.retry({ delaySeconds: Math.min(300, 15 * 2 ** message.attempts) });
+          continue;
+        }
+        message.ack();
+      } catch (error) {
+        console.error("Notification queue error", {
+          assignmentId,
+          message: error instanceof Error ? error.message : String(error),
+        });
+        message.retry({ delaySeconds: Math.min(300, 15 * 2 ** message.attempts) });
+      }
+    }
+  },
 };
+
+async function scheduleAssignedItem(env, assignmentId, fireAt) {
+  try {
+    if (env.ASSIGNMENT_LIFECYCLE) {
+      await env.ASSIGNMENT_LIFECYCLE.create({
+        id: `assignment-${assignmentId}`,
+        params: { assignmentId, fireAt },
+        retention: { successRetention: "7 days", errorRetention: "14 days" },
+      });
+      return { attempted: 0, sent: 0, failed: 0, scheduled: true, durable: true };
+    }
+    if (env.NOTIFICATION_QUEUE) {
+      await env.NOTIFICATION_QUEUE.send({ type: "assigned-item", assignmentId });
+      return { attempted: 0, sent: 0, failed: 0, scheduled: true, queued: true };
+    }
+  } catch (error) {
+    console.error("Assignment lifecycle scheduling failed", {
+      assignmentId,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+  if (fireAt <= Date.now()) {
+    const item = await env.DB.prepare(
+      "SELECT id, to_user, from_user, kind, payload FROM assigned_items WHERE id = ?",
+    ).bind(assignmentId).first();
+    if (item) return a(env, item);
+  }
+  return { attempted: 0, sent: 0, failed: 0, scheduled: true, fallback: "cron" };
+}
 async function r(e, r) {
   const i = e.headers.get("Authorization");
   if (!i || !i.startsWith("Bearer ")) return null;
