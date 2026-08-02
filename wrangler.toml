@@ -26,6 +26,23 @@ TURNSTILE_VERIFY_URL = "https://turnstile-siteverify-daysie.neil27.workers.dev/"
 binding = "TURNSTILE_VERIFY"
 service = "turnstile-siteverify-daysie"
 
+[[workflows]]
+binding = "ASSIGNMENT_LIFECYCLE"
+name = "daysie-assignment-lifecycle"
+class_name = "AssignmentLifecycleWorkflow"
+
+[[queues.producers]]
+binding = "NOTIFICATION_QUEUE"
+queue = "daysie-notifications"
+
+[[queues.consumers]]
+queue = "daysie-notifications"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 5
+dead_letter_queue = "daysie-notifications-dlq"
+retry_delay = 15
+
 # Cron trigger for scheduled push notifications (runs every minute)
 [triggers]
 crons = ["* * * * *"]
