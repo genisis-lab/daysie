@@ -77,7 +77,8 @@ test("safety and quality features cover trash, import preview, storage, accessib
   assert.match(powerWorker, /performance_metrics/);
 });
 
-test("email verification remains disabled as requested", () => {
-  assert.match(auth, /updateEmailWithoutVerification:\s*true/);
+test("email changes require verification without blocking sign-up", () => {
+  assert.match(auth, /updateEmailWithoutVerification:\s*false/);
+  assert.match(auth, /sendOnSignUp:\s*false/);
   assert.doesNotMatch(auth, /requireEmailVerification:\s*true/);
 });

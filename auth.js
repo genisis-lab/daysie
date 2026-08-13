@@ -114,6 +114,34 @@ export function createDaysieAuth(env, request, executionContext) {
         geolocationTracking: false,
       },
       {
+        emailVerification: {
+          sendOnSignUp: false,
+          expiresIn: 60 * 60,
+          sendVerificationEmail: async ({ user, url }) => {
+            const emailPromise = sendDaysieEmail(env, {
+              to: user.email,
+              template: "verify-email",
+              variables: {
+                verificationUrl: url,
+                userEmail: user.email,
+                userName: user.name || "there",
+                appName: "Daysie",
+                expirationMinutes: "60",
+              },
+              subject: "Verify your Daysie email",
+              html: `
+                <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#332b24;line-height:1.6">
+                  <h1 style="color:#b36d08">Verify your Daysie email</h1>
+                  <p>Hi ${escapeHtml(user.name || "there")},</p>
+                  <p>Use the button below to confirm this email address before Daysie updates your account.</p>
+                  <p><a href="${escapeHtml(url)}" style="display:inline-block;padding:12px 20px;border-radius:12px;background:#b36d08;color:white;text-decoration:none;font-weight:700">Verify email</a></p>
+                  <p style="color:#6f655d;font-size:14px">If you did not request this change, you can safely ignore this email.</p>
+                </div>`,
+            });
+            if (executionContext) executionContext.waitUntil(emailPromise);
+            else await emailPromise;
+          },
+        },
         emailAndPassword: {
           enabled: true,
           minPasswordLength: 8,
@@ -147,7 +175,7 @@ export function createDaysieAuth(env, request, executionContext) {
         user: {
           changeEmail: {
             enabled: true,
-            updateEmailWithoutVerification: true,
+            updateEmailWithoutVerification: false,
           },
         },
         plugins: [

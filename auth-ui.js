@@ -415,12 +415,13 @@ $("#changeEmailForm")?.addEventListener("submit", async (event) => {
   const email = $("#changeEmailInput").value.trim().toLowerCase();
   setButtonBusy(button, true, "Changing…");
   try {
-    await authRequest("/change-email", { newEmail: email }, settings.authToken);
-    settings.authEmail = email;
-    saveSettings();
-    updateAccountUI();
+    await authRequest(
+      "/change-email",
+      { newEmail: email, callbackURL: window.location.origin },
+      settings.authToken,
+    );
     $("#changeEmailForm").reset();
-    toast("Email updated", `You can now sign in with ${email}.`);
+    toast("Check your inbox", `Verify ${email} before Daysie updates your account.`);
   } catch (error) {
     toast("Could not change email", error.message);
   } finally {

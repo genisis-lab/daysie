@@ -74,13 +74,11 @@ async function currentTotp(uri) {
 }
 
 describe("Daysie Worker runtime", () => {
-  it("boots in the Workers runtime and reports bound storage", async () => {
+  it("boots in the Workers runtime and reports minimal liveness", async () => {
     const response = await SELF.fetch("https://daysie.test/health");
     expect(response.status).toBe(200);
     const health = await response.json();
-    expect(health.ok).toBe(true);
-    expect(health.storage).toEqual({ d1: true, photos: true });
-    expect(health.services.passkeys).toBe(true);
+    expect(health).toEqual({ ok: true, service: "daysie-api" });
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("content-security-policy")).toContain("default-src 'none'");
