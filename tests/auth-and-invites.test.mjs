@@ -14,7 +14,10 @@ test("Better Auth is mounted with D1, email/password, and bearer sessions", () =
   assert.match(auth, /d1Native:\s*env\.DB/);
   assert.match(auth, /emailAndPassword:\s*\{/);
   assert.match(auth, /changeEmail:\s*\{/);
-  assert.match(auth, /updateEmailWithoutVerification:\s*true/);
+  assert.match(auth, /emailVerification:\s*\{/);
+  assert.match(auth, /sendVerificationEmail:\s*async/);
+  assert.match(auth, /verificationUrl:\s*url/);
+  assert.match(auth, /updateEmailWithoutVerification:\s*false/);
   assert.match(auth, /enabled:\s*true/);
   assert.match(auth, /bearer\(\)/);
   assert.match(auth, /username\(\{/);
@@ -72,8 +75,8 @@ test("Turnstile protects sign-in and sign-up through the managed verification Wo
   assert.match(authUi, /new FormData\(form\)\.get\("cf-turnstile-response"\)/);
   assert.match(authUi, /turnstileToken/);
   assert.match(worker, /verifyTurnstileToken\(E, turnstileToken\)/);
-  assert.match(worker, /if \(!verification\.success\)/);
-  assert.doesNotMatch(worker, /verification\.action !==/);
+  assert.match(worker, /verification\.action !== "turnstile-spin-v1"/);
+  assert.match(worker, /allowedTurnstileHostnames\.has\(verification\.hostname\)/);
   assert.match(worker, /env\.TURNSTILE_VERIFY_URL/);
   assert.match(worker, /env\.TURNSTILE_VERIFY/);
   assert.match(wrangler, /binding = "TURNSTILE_VERIFY"/);

@@ -241,6 +241,15 @@ test("Cloudflare Pages security headers are configured", () => {
   );
 });
 
+test("publishes a canonical text/plain security disclosure", () => {
+  const policy = read(".well-known/security.txt");
+  const headers = read("_headers");
+  assert.match(policy, /Contact: https:\/\/github\.com\/genisis-lab\/daysie\/security\/advisories\/new/);
+  assert.match(policy, /Expires: 2027-08-13T00:00:00Z/);
+  assert.match(policy, /Canonical: https:\/\/daysie\.builtwai\.com\/\.well-known\/security\.txt/);
+  assert.match(headers, /\/\.well-known\/security\.txt[\s\S]*Content-Type: text\/plain; charset=utf-8/);
+});
+
 test("production authentication uses the custom Daysie origin", () => {
   const auth = read("auth.js");
   const worker = read("worker.js");

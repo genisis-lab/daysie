@@ -10,6 +10,11 @@ test("worker exposes operational health, session, and photo management endpoints
 
   assert.ok(worker.includes('"/health" === p'), "health endpoint should exist");
   assert.ok(
+    worker.includes('return c({ ok: true, service: "daysie-api" }, 200, m);'),
+    "public health should expose only minimal liveness",
+  );
+  assert.doesNotMatch(worker, /storage:\s*\{\s*d1:/);
+  assert.ok(
     worker.includes('"/sessions" === p'),
     "session list endpoint should exist",
   );

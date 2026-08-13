@@ -89,9 +89,17 @@ export default {
           if (!(await u(E, `auth:${authIp}`, 20, 15 * 60 * 1000)))
             return c({ error: "Too many sign-in attempts. Try again later." }, 429, m);
           const verification = await verifyTurnstileToken(E, turnstileToken);
-          if (!verification.success) {
+          const allowedTurnstileHostnames = new Set(
+            appOrigins.map((origin) => new URL(origin).hostname),
+          );
+          if (
+            !verification.success ||
+            verification.action !== "turnstile-spin-v1" ||
+            !allowedTurnstileHostnames.has(verification.hostname)
+          ) {
             console.warn("Turnstile rejected an authentication request", {
               errorCodes: verification["error-codes"] || [],
+              actionMatched: verification.action === "turnstile-spin-v1",
             });
             return c({ error: "Security check failed. Please try again." }, 403, m);
           }
@@ -134,25 +142,7 @@ export default {
         });
       }
       if ("/health" === p && "GET" === e.method) {
-        let r = !1;
-        try {
-          (await E.DB.prepare("SELECT 1 AS ok").first(), (r = !0));
-        } catch (e) {}
-        return c(
-          {
-            ok: r,
-            service: "daysie-api",
-            storage: { d1: r, photos: !!E.PHOTOS },
-            services: {
-              email: !!(E.BETTER_AUTH_API_KEY || (E.RESEND_API_KEY && E.EMAIL_FROM)),
-              push: !!(E.VAPID_PUBLIC_KEY && E.VAPID_PRIVATE_KEY),
-              passkeys: true,
-            },
-            time: new Date().toISOString(),
-          },
-          r ? 200 : 503,
-          m,
-        );
+        return c({ ok: true, service: "daysie-api" }, 200, m);
       }
       if ("/account/create" === p && "POST" === e.method) {
         const r = e.headers.get("CF-Connecting-IP") || "unknown";

@@ -18,10 +18,10 @@
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.18.6",
-    "@cloudflare/workers-types": "5.20260721.1",
+    "@cloudflare/vitest-pool-workers": "^0.21.2",
+    "@cloudflare/workers-types": "5.20260813.1",
     "esbuild": "^0.28.1",
     "vitest": "^4.1.10",
-    "wrangler": "^4.112.0"
+    "wrangler": "^4.122.0"
   }
 }
