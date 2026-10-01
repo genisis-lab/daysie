@@ -241,3 +241,7 @@ CREATE INDEX IF NOT EXISTS idx_family_chores_family ON family_chores(family_id, 
 CREATE TABLE IF NOT EXISTS notification_digest_log (user_id TEXT NOT NULL, digest_type TEXT NOT NULL, period_key TEXT NOT NULL, sent_at INTEGER NOT NULL, PRIMARY KEY (user_id, digest_type, period_key));
 CREATE TABLE IF NOT EXISTS backup_verifications (backup_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, envelope_hash TEXT NOT NULL, verified_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_assigned_receipts ON assigned_items(family_id, created DESC, seen_at, completed_at);
+CREATE TABLE IF NOT EXISTS reminder_deliveries (user_id TEXT NOT NULL, task_id TEXT NOT NULL, due_at INTEGER NOT NULL, status TEXT NOT NULL, claimed_at INTEGER NOT NULL, delivered_at INTEGER, PRIMARY KEY (user_id, task_id, due_at));
+CREATE INDEX IF NOT EXISTS idx_reminder_deliveries_claimed ON reminder_deliveries(claimed_at);
+CREATE TABLE IF NOT EXISTS push_expired_endpoints (endpoint_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, device_name TEXT, expired_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_push_expired_endpoints_expired ON push_expired_endpoints(expired_at);

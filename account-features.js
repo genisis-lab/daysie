@@ -222,7 +222,7 @@
       if (isIOS() && !isStandalone()) throw new Error('On iPhone or iPad, add Daysie to your Home Screen, open it there, then enable notifications.');
       if (Notification.permission !== "granted") await enableNotifications();
       if (Notification.permission !== "granted") throw new Error("Allow notifications first, then try again.");
-      await refreshPushSubscription();
+      if (!(await refreshPushSubscription({ force: true }))) throw new Error("This device could not connect for closed-app notifications. Tap “Reconnect this device” and try again.");
       const result = await request("/push/test", { method: "POST", body: "{}" });
       toast("Test sent", `Delivered to ${result.sent} of ${result.attempted} connected device${result.attempted === 1 ? "" : "s"}.`);
       await loadPushStatus();

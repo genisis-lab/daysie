@@ -14,7 +14,7 @@ const migration = read("migrations/0007_notification_reliability.sql");
 test("push subscriptions support multiple devices per user", () => {
   assert.match(migration, /endpoint TEXT NOT NULL UNIQUE/);
   assert.match(migration, /idx_push_subscriptions_user/);
-  assert.match(worker, /SELECT id, subscription FROM push_subscriptions WHERE user_id = \?/);
+  assert.match(worker, /SELECT id, endpoint, device_name, subscription FROM push_subscriptions WHERE user_id = \?/);
   assert.match(worker, /async function sendPushToUser/);
   assert.doesNotMatch(worker, /INSERT OR REPLACE INTO push_subscriptions \(user_id/);
 });

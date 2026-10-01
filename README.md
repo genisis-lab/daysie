@@ -30,7 +30,8 @@ Daysie is a beautiful, accessible reminder and journal app designed for **people
 - **Per-device controls** — Rename, pause, resume, or remove individual notification devices
 - **Action buttons and digests** — Complete or snooze supported notifications and opt into morning, evening, or weekly summaries
 - **PWA badges** — Supported devices show a badge for new reminders and clear it when Daysie is opened
-- **Re-nag alerts** — Overdue important tasks re-alert every 5 minutes (TickTick-style)
+- **Re-nag alerts** — Overdue important tasks re-alert every 5 minutes while Daysie is open (for up to a day)
+- **Self-healing push** — Push connections are re-checked whenever Daysie returns to the foreground, expired or rotated connections are replaced automatically, and each reminder is delivered once even when several devices sync
 
 > **iPhone and iPad note:** Apple controls the sound and vibration used by background web push notifications. Daysie's custom tones play while the PWA is open; custom vibration strengths are requested only on browsers that support the Vibration API.
 
