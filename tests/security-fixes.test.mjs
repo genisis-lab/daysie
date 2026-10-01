@@ -96,13 +96,13 @@ test("local-only onboarding does not automatically create a cloud sync account",
   );
   const refreshPushSubscription = sliceBetween(
     app,
-    "async function refreshPushSubscription()",
+    "async function refreshPushSubscription(",
     "function urlBase64ToUint8Array(",
   );
   const enableNotifications = sliceBetween(
     app,
-    "async function enableNotifications()",
-    "async function refreshPushSubscription()",
+    "async function registerPushSubscription(",
+    "async function refreshPushSubscription(",
   );
   const loadFamily = sliceBetween(
     app3,

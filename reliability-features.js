@@ -40,6 +40,12 @@
     return { ok: false, text: "Not requested" };
   };
 
+  async function endpointHash(endpoint) {
+    if (!endpoint || !crypto?.subtle) return "";
+    const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`push-endpoint:${endpoint}`));
+    return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+
   async function loadNotificationDiagnostics() {
     if (!settings.authToken || !byId("notificationDiagnostics")) return;
     const target = byId("notificationDiagnostics");
@@ -47,6 +53,8 @@
       const data = await request("/reliability/notifications/diagnostics");
       const registration = "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistration() : null;
       const currentSubscription = registration?.pushManager ? await registration.pushManager.getSubscription() : null;
+      const currentHash = await endpointHash(currentSubscription?.endpoint);
+      const thisDevice = currentHash ? data.devices.find((device) => device.endpointHash === currentHash) : null;
       const permission = permissionLabel();
       const installed = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
       const active = data.devices.filter((device) => device.enabled).length;
@@ -55,12 +63,13 @@
         [installed || !/iPhone|iPad|iPod/.test(navigator.userAgent), "App install", installed ? "Installed" : "Browser tab"],
         [data.authenticated, "Session", data.accountType === "account" ? "Secure account" : "Legacy device"],
         [data.pushConfigured, "Push service", data.pushConfigured ? "Online" : "Unavailable"],
+        [Boolean(thisDevice?.enabled), "This device", thisDevice ? (thisDevice.enabled ? "Connected" : "Paused") : "Not connected · tap Reconnect"],
         [active > 0, "Connected devices", `${active} active`],
       ].map(([ok, label, detail]) => `<div><span aria-hidden="true">${ok ? "✅" : "⚠️"}</span><b>${safe(label)}</b><small>${safe(detail)}</small></div>`).join("");
       const list = byId("notificationDeviceList");
       list.innerHTML = data.devices.length ? data.devices.map((device) => `
         <div class="notification-device-card" data-device-id="${safe(device.id)}">
-          <div><b>${device.enabled ? "🔔" : "🔕"} ${safe(device.name)}</b><small>${device.lastSuccessAt ? `Delivered ${dateTime(device.lastSuccessAt)}` : device.lastFailureAt ? `Failed ${dateTime(device.lastFailureAt)}${device.lastStatus ? ` · ${device.lastStatus}` : ""}` : "Waiting for first delivery"}</small></div>
+          <div><b>${device.enabled ? "🔔" : "🔕"} ${safe(device.name)}${device === thisDevice ? " · this device" : ""}</b><small>${device.lastSuccessAt ? `Delivered ${dateTime(device.lastSuccessAt)}` : device.lastFailureAt ? `Failed ${dateTime(device.lastFailureAt)}${device.lastStatus ? ` · ${device.lastStatus}` : ""}` : "Waiting for first delivery"}</small></div>
           <div class="row-actions"><button type="button" class="text-button" data-device-rename>Rename</button><button type="button" class="text-button" data-device-toggle>${device.enabled ? "Pause" : "Resume"}</button><button type="button" class="text-button danger-text" data-device-remove>Remove</button></div>
         </div>`).join("") : "<small>No closed-app notification device is connected.</small>";
       list.querySelectorAll("[data-device-id]").forEach((card) => {
@@ -78,9 +87,11 @@
         card.querySelector("[data-device-remove]").onclick = async () => {
           if (!confirm(`Remove ${device.name} from notifications?`)) return;
           await request(`/reliability/notifications/devices/${encodeURIComponent(device.id)}`, { method: "DELETE" });
-          if (currentSubscription?.endpoint === device.endpoint) {
-            await currentSubscription.unsubscribe();
+          if (currentSubscription && device === thisDevice) {
+            await currentSubscription.unsubscribe().catch(() => {});
             settings.pushSubscription = null;
+            // Stay removed until the person turns notifications back on here.
+            settings.pushRemoved = true;
             saveSettings();
           }
           await loadNotificationDiagnostics();
@@ -159,12 +170,15 @@
   byId("settingsBtn")?.addEventListener("click", () => setTimeout(loadNotificationDiagnostics, 150));
   byId("refreshHealthBtn")?.addEventListener("click", () => setTimeout(loadNotificationDiagnostics, 80));
   byId("reconnectNotificationsBtn")?.addEventListener("click", async () => {
+    const button = byId("reconnectNotificationsBtn");
+    button.disabled = true;
     try {
-      await enableNotifications();
-      await refreshPushSubscription();
+      // A fresh subscription replaces one the push service may have dropped.
+      const connected = await enableNotifications({ fresh: true });
       await loadNotificationDiagnostics();
-      toast("Notifications reconnected", "This device is ready for closed-app reminders.");
+      if (connected) toast("Notifications reconnected", "This device is ready for closed-app reminders.");
     } catch (error) { toast("Could not reconnect", error.message); }
+    finally { button.disabled = false; }
   });
 
   byId("saveFamilyAvailability")?.addEventListener("click", async () => {
@@ -229,20 +243,23 @@
     const assignmentId = url.searchParams.get("assignment");
     const taskId = url.searchParams.get("task");
     if (!assignmentId && taskId) {
-      const task = (db.profiles || []).flatMap((profile) => profile.tasks || []).find((item) => item.id === taskId);
+      const findTask = () => (db.profiles || []).flatMap((profile) => profile.tasks || []).find((item) => item.id === taskId);
+      let task = findTask();
+      // The reminder may come from a task added on another device.
+      if (!task && settings.authToken && typeof window.mergeDaysieFromCloud === "function") {
+        await window.mergeDaysieFromCloud({ force: true });
+        task = findTask();
+      }
       const taskAction = url.searchParams.get("notificationAction");
       if (task && taskAction === "complete") {
-        task.done = true;
-        task.completedAt = Date.now();
-        task.updatedAt = Date.now();
-        save();
-        renderAll();
+        // completeTask also schedules the next occurrence of repeating
+        // reminders; setting done directly made daily reminders stop.
+        if (!task.done) completeTask(task);
         if (settings.authToken) syncToCloud();
         toast("Reminder completed", task.title);
       } else if (task && taskAction === "snooze") {
         task.due = Date.now() + 60 * 60_000;
         task.notified = false;
-        task.updatedAt = Date.now();
         save();
         renderAll();
         if (settings.authToken) syncToCloud();
@@ -264,7 +281,23 @@
     } catch (error) { console.error("Notification action failed", error); }
   }
 
+  // Notification taps reach an already-open window as a message, so the
+  // action applies without reloading the app.
+  if ("serviceWorker" in navigator)
+    navigator.serviceWorker.addEventListener("message", (event) => {
+      if (event.data?.type !== "notification-click") return;
+      try {
+        const next = new URL(event.data.url, location.href);
+        if (next.origin !== location.origin) return;
+        history.replaceState({}, "", `${next.pathname}${next.search}${next.hash}`);
+      } catch { return; }
+      if (typeof clearNotificationBadge === "function") clearNotificationBadge();
+      handleNotificationAction();
+    });
+
   setTimeout(() => {
+    // Task actions from local notifications work without an account.
+    if (!settings.authToken) handleNotificationAction();
     if (settings.authToken) {
       loadNotificationDiagnostics();
       handleNotificationAction();

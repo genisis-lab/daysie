@@ -53,6 +53,15 @@ Enable unique usernames for new and existing accounts:
 npx wrangler d1 execute daysie-db --remote --file=migrations/0003_usernames.sql
 ```
 
+Apply later migrations in order the same way. `0009_notification_ledger.sql`
+adds the reminder delivery ledger and the expired push-connection list; the
+Worker also creates both tables on first use, so it is safe to deploy before or
+after running it:
+
+```bash
+npx wrangler d1 execute daysie-db --remote --file=migrations/0009_notification_ledger.sql
+```
+
 ### Step 4: Configure Better Auth and email
 
 Generate and store a Better Auth secret:
@@ -215,6 +224,15 @@ For a family app, you'll stay well within free tier limits! 🌼
 - Check Worker logs for `Push send error` (`wrangler tail`).
 - Check browser console for errors
 - Verify Service Worker is registered (DevTools > Application > Service Workers)
+- Settings → Notifications shows a **This device** row. If it says "Not connected",
+  tap **Reconnect this device**; this replaces a push connection the browser or
+  push service has dropped.
+- The server only sends reminders that became due in the last 24 hours, and each
+  task/due-time pair is sent once (`reminder_deliveries`). A reminder suppressed by
+  quiet hours is retried when quiet hours end.
+- Push connections rejected with 404/410 are remembered in `push_expired_endpoints`;
+  the device is told to re-subscribe the next time Daysie is opened, and a
+  rotated subscription is re-linked automatically by the service worker.
 
 ## Shipping an update (so users load the new app)
 

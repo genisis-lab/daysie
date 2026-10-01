@@ -2,7 +2,14 @@ import { SELF, env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import worker from "../worker.js";
 import { createDaysieAuth } from "../auth.js";
-import { nextOccurrence, zonedParts } from "../reliability-worker.js";
+import {
+  REMINDER_LOOKBACK,
+  dueTaskReminders,
+  nextOccurrence,
+  rememberExpiredEndpoint,
+  runTaskReminders,
+  zonedParts,
+} from "../reliability-worker.js";
 
 beforeAll(async () => {
   await env.DB.exec(`
@@ -492,5 +499,211 @@ describe("Daysie Worker runtime", () => {
     });
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: "Internal server error" });
+  });
+});
+
+describe("Task reminder delivery", () => {
+  const seedUser = async (tasks, { revision = 1, updatedAt = Date.now() - 60_000 } = {}) => {
+    const userId = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO user_data (user_id, data, updated_at, revision) VALUES (?, ?, ?, ?)")
+      .bind(userId, JSON.stringify({ profiles: [{ id: "me", name: "Me", tasks }] }), updatedAt, revision)
+      .run();
+    return userId;
+  };
+  const storedTasks = async (userId) => {
+    const row = await env.DB.prepare("SELECT data, revision, updated_at FROM user_data WHERE user_id = ?").bind(userId).first();
+    return { ...row, tasks: JSON.parse(row.data).profiles[0].tasks };
+  };
+  const recorder = (userId, result = { attempted: 1, sent: 1, failed: 0 }) => {
+    const calls = [];
+    const send = async (targetUserId, payload, category) => {
+      if (targetUserId !== userId) return { attempted: 0, sent: 0, failed: 0 };
+      calls.push({ payload, category });
+      return typeof result === "function" ? result(payload) : result;
+    };
+    return { calls, send };
+  };
+
+  it("does not rewrite synced data when nothing is due", async () => {
+    const now = Date.now();
+    const updatedAt = now - 120_000;
+    const userId = await seedUser([{ id: "future", title: "Later", due: now + 3_600_000 }], { updatedAt });
+    const { calls, send } = recorder(userId);
+    await runTaskReminders(env, now, send);
+    expect(calls).toHaveLength(0);
+    expect((await storedTasks(userId)).updated_at).toBe(updatedAt);
+  });
+
+  it("sends a due reminder once even after a device overwrites the notified flag", async () => {
+    const now = Date.now();
+    const task = { id: "pills", title: "Take pills", note: "With breakfast", due: now - 30_000, priority: "high" };
+    const userId = await seedUser([task]);
+    const { calls, send } = recorder(userId);
+    await runTaskReminders(env, now, send);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      category: "reminders",
+      payload: { title: "⏰ Take pills", body: "With breakfast", tag: "pills", taskId: "pills", requireInteraction: true },
+    });
+    const afterFirst = await storedTasks(userId);
+    expect(afterFirst.tasks[0].notified).toBe(true);
+    expect(afterFirst.revision).toBe(1);
+
+    // A device that never saw the push syncs its stale copy (notified=false).
+    await env.DB.prepare("UPDATE user_data SET data = ?, revision = 2 WHERE user_id = ?")
+      .bind(JSON.stringify({ profiles: [{ id: "me", name: "Me", tasks: [task] }] }), userId)
+      .run();
+    await runTaskReminders(env, now + 60_000, send);
+    expect(calls).toHaveLength(1);
+    expect((await storedTasks(userId)).tasks[0].notified).toBe(true);
+  });
+
+  it("never overwrites a device sync that lands while reminders are sending", async () => {
+    const now = Date.now();
+    const userId = await seedUser([{ id: "call", title: "Call Sam", due: now - 10_000 }]);
+    const { calls, send } = recorder(userId, async () => {
+      await env.DB.prepare("UPDATE user_data SET data = ?, revision = 2, updated_at = ? WHERE user_id = ?")
+        .bind(JSON.stringify({ profiles: [{ id: "me", name: "Me", tasks: [
+          { id: "call", title: "Call Sam", due: now - 10_000 },
+          { id: "new", title: "Added on another phone", due: now + 86_400_000 },
+        ] }] }), Date.now(), userId)
+        .run();
+      return { attempted: 1, sent: 1, failed: 0 };
+    });
+    await runTaskReminders(env, now, send);
+    expect(calls).toHaveLength(1);
+    const stored = await storedTasks(userId);
+    expect(stored.revision).toBe(2);
+    expect(stored.tasks.map((item) => item.id)).toEqual(["call", "new"]);
+    // The next run repairs the flag without sending the reminder again.
+    await runTaskReminders(env, now + 60_000, send);
+    expect(calls).toHaveLength(1);
+    expect((await storedTasks(userId)).tasks[0].notified).toBe(true);
+  });
+
+  it("retries after quiet hours but stops checking reminders the account switched off", async () => {
+    const now = Date.now();
+    const quietUser = await seedUser([{ id: "quiet", title: "Quiet", due: now - 5_000 }]);
+    let quiet = true;
+    const quietSend = recorder(quietUser, () =>
+      quiet ? { attempted: 0, sent: 0, failed: 0, suppressed: true, reason: "quiet-hours" } : { attempted: 1, sent: 1, failed: 0 },
+    );
+    await runTaskReminders(env, now, quietSend.send);
+    expect((await storedTasks(quietUser)).tasks[0].notified).toBeUndefined();
+    quiet = false;
+    await runTaskReminders(env, now + 60_000, quietSend.send);
+    expect(quietSend.calls).toHaveLength(2);
+    expect((await storedTasks(quietUser)).tasks[0].notified).toBe(true);
+
+    const offUser = await seedUser([{ id: "off", title: "Off", due: now - 5_000 }]);
+    const offSend = recorder(offUser, { attempted: 0, sent: 0, failed: 0, suppressed: true, reason: "category" });
+    await runTaskReminders(env, now, offSend.send);
+    await runTaskReminders(env, now + 60_000, offSend.send);
+    expect(offSend.calls).toHaveLength(1);
+    expect((await storedTasks(offUser)).tasks[0].notified).toBeUndefined();
+  });
+
+  it("skips stale reminders and keeps going past an account with corrupt data", async () => {
+    const now = Date.now();
+    expect(dueTaskReminders({ profiles: [{ tasks: [
+      { id: "stale", due: now - REMINDER_LOOKBACK - 1 },
+      { id: "done", due: now - 1_000, done: true },
+      { id: "fresh", due: now - 1_000 },
+    ] }] }, now).map((item) => item.task.id)).toEqual(["fresh"]);
+    await env.DB.prepare("INSERT INTO user_data (user_id, data, updated_at, revision) VALUES (?, '{broken', ?, 1)")
+      .bind(crypto.randomUUID(), now)
+      .run();
+    const userId = await seedUser([{ id: "after", title: "After broken row", due: now - 1_000 }]);
+    const { calls, send } = recorder(userId);
+    await runTaskReminders(env, now, send);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("runs the whole scheduled handler without push devices", async () => {
+    const now = Date.now();
+    const userId = await seedUser([{ id: "nodevice", title: "No device", due: now - 1_000 }]);
+    await worker.scheduled({}, env, { waitUntil() {} });
+    expect((await storedTasks(userId)).tasks[0].notified).toBeUndefined();
+  });
+});
+
+describe("Push connection recovery", () => {
+  const validSubscription = (host = "web.push.apple.com") => ({
+    endpoint: `https://${host}/${crypto.randomUUID()}`,
+    keys: { p256dh: `B${"A".repeat(86)}`, auth: "a".repeat(22) },
+  });
+  const signedIn = async () => {
+    const userId = crypto.randomUUID();
+    const token = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO users (id, created_at) VALUES (?, ?)").bind(userId, Date.now()),
+      env.DB.prepare("INSERT INTO sessions (token, user_id, expires) VALUES (?, ?, ?)").bind(token, userId, Date.now() + 60_000),
+    ]);
+    return { userId, token };
+  };
+  const subscribe = (token, body) =>
+    SELF.fetch("https://daysie.test/push/subscribe", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  it("tells a device to re-subscribe when its endpoint already expired", async () => {
+    const { userId, token } = await signedIn();
+    const dead = validSubscription();
+    await rememberExpiredEndpoint(env, { endpoint: dead.endpoint, userId, deviceName: "Phone" });
+    const rejected = await subscribe(token, { subscription: dead, deviceName: "Phone" });
+    expect(rejected.status).toBe(410);
+    expect(await rejected.json()).toMatchObject({ expired: true });
+    expect(await env.DB.prepare("SELECT 1 FROM push_subscriptions WHERE endpoint = ?").bind(dead.endpoint).first()).toBeNull();
+
+    const fresh = validSubscription();
+    const accepted = await subscribe(token, { subscription: fresh, deviceName: "Phone", replaces: dead.endpoint });
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toMatchObject({ success: true, devices: 1 });
+  });
+
+  it("replaces an older subscription from the same device", async () => {
+    const { userId, token } = await signedIn();
+    const first = validSubscription();
+    const second = validSubscription();
+    expect((await subscribe(token, { subscription: first })).status).toBe(200);
+    expect((await subscribe(token, { subscription: second, replaces: first.endpoint })).status).toBe(200);
+    const rows = await env.DB.prepare("SELECT endpoint FROM push_subscriptions WHERE user_id = ?").bind(userId).all();
+    expect(rows.results.map((row) => row.endpoint)).toEqual([second.endpoint]);
+  });
+
+  it("moves a rotated subscription from the service worker to the same account", async () => {
+    const { userId, token } = await signedIn();
+    const original = validSubscription("fcm.googleapis.com");
+    expect((await subscribe(token, { subscription: original, deviceName: "Pixel" })).status).toBe(200);
+    const rotated = validSubscription("fcm.googleapis.com");
+    const response = await SELF.fetch("https://daysie.test/push/resubscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ oldEndpoint: original.endpoint, subscription: rotated }),
+    });
+    expect(response.status).toBe(200);
+    const rows = await env.DB.prepare("SELECT endpoint, device_name FROM push_subscriptions WHERE user_id = ?").bind(userId).all();
+    expect(rows.results).toEqual([{ endpoint: rotated.endpoint, device_name: "Pixel" }]);
+
+    // An expired endpoint can also be recovered, but an unknown one cannot.
+    const expired = validSubscription();
+    await rememberExpiredEndpoint(env, { endpoint: expired.endpoint, userId, deviceName: "iPhone" });
+    const recovered = validSubscription();
+    const recoveredResponse = await SELF.fetch("https://daysie.test/push/resubscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ oldEndpoint: expired.endpoint, subscription: recovered }),
+    });
+    expect(recoveredResponse.status).toBe(200);
+    const recoveredRow = await env.DB.prepare("SELECT user_id, device_name FROM push_subscriptions WHERE endpoint = ?").bind(recovered.endpoint).first();
+    expect(recoveredRow).toEqual({ user_id: userId, device_name: "iPhone" });
+    const unknown = await SELF.fetch("https://daysie.test/push/resubscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ oldEndpoint: validSubscription().endpoint, subscription: validSubscription() }),
+    });
+    expect(unknown.status).toBe(404);
   });
 });

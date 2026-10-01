@@ -161,8 +161,10 @@ async function claimLegacyAccount(request, env, userId, corsHeaders) {
   if (legacyFamily && currentFamily && legacyFamily.family_id !== currentFamily.family_id)
     return reply({ error: "Both accounts belong to different families. Leave one family before migrating." }, 409, corsHeaders);
 
+  await ensureNotificationLedger(env);
   const statements = [
     env.DB.prepare("UPDATE push_subscriptions SET user_id = ? WHERE user_id = ?").bind(userId, legacyUserId),
+    env.DB.prepare("UPDATE push_expired_endpoints SET user_id = ? WHERE user_id = ?").bind(userId, legacyUserId),
     env.DB.prepare("UPDATE photo_access SET user_id = ? WHERE user_id = ?").bind(userId, legacyUserId),
     env.DB.prepare("UPDATE assigned_items SET from_user = ? WHERE from_user = ?").bind(userId, legacyUserId),
     env.DB.prepare("UPDATE assigned_items SET to_user = ? WHERE to_user = ?").bind(userId, legacyUserId),
@@ -179,6 +181,7 @@ async function claimLegacyAccount(request, env, userId, corsHeaders) {
   if (!targetData) {
     statements.push(env.DB.prepare("UPDATE user_data SET user_id = ? WHERE user_id = ?").bind(userId, legacyUserId));
     statements.push(env.DB.prepare("UPDATE user_data_versions SET user_id = ? WHERE user_id = ?").bind(userId, legacyUserId));
+    statements.push(env.DB.prepare("UPDATE OR IGNORE reminder_deliveries SET user_id = ? WHERE user_id = ?").bind(userId, legacyUserId));
   }
   if (!targetPrefs) statements.push(env.DB.prepare("UPDATE notification_preferences SET user_id = ? WHERE user_id = ?").bind(userId, legacyUserId));
   else statements.push(env.DB.prepare("DELETE FROM notification_preferences WHERE user_id = ?").bind(legacyUserId));
@@ -213,7 +216,7 @@ export async function handleReliabilityRequest({ request, env, userId, corsHeade
 
   if (path === "/reliability/notifications/diagnostics" && request.method === "GET") {
     const [devices, preferences, session] = await Promise.all([
-      env.DB.prepare("SELECT id, device_name, enabled, created_at, updated_at, last_success_at, last_failure_at, last_status FROM push_subscriptions WHERE user_id = ? ORDER BY updated_at DESC").bind(userId).all(),
+      env.DB.prepare("SELECT id, endpoint, device_name, enabled, created_at, updated_at, last_success_at, last_failure_at, last_status FROM push_subscriptions WHERE user_id = ? ORDER BY updated_at DESC").bind(userId).all(),
       env.DB.prepare("SELECT quiet_start, quiet_end, timezone, digest_morning, digest_evening, digest_weekly, digest_time FROM notification_preferences WHERE user_id = ?").bind(userId).first(),
       env.DB.prepare('SELECT CASE WHEN EXISTS(SELECT 1 FROM "session" WHERE userId = ?) THEN 1 ELSE 0 END AS better_auth').bind(userId).first(),
     ]);
@@ -223,12 +226,15 @@ export async function handleReliabilityRequest({ request, env, userId, corsHeade
       accountType: session?.better_auth ? "account" : "legacy-device",
       pushConfigured: Boolean(env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY),
       preferences: preferences || null,
-      devices: (devices.results || []).map((row) => ({
+      // endpointHash lets the browser recognise its own row without the
+      // endpoint (a push capability URL) ever leaving the server.
+      devices: await Promise.all((devices.results || []).map(async (row) => ({
         id: row.id, name: row.device_name || "Daysie device", enabled: row.enabled !== 0,
         createdAt: row.created_at, updatedAt: row.updated_at,
         lastSuccessAt: row.last_success_at, lastFailureAt: row.last_failure_at,
         lastStatus: row.last_status,
-      })),
+        endpointHash: await endpointHash(row.endpoint),
+      }))),
     }, 200, corsHeaders);
   }
 
@@ -397,4 +403,164 @@ async function runDigests(env, now, sendPush) {
 export async function runReliabilitySchedule(env, timestamp, sendPush) {
   await runChores(env, timestamp, sendPush);
   await runDigests(env, timestamp, sendPush);
+}
+
+// ---------------------------------------------------------------------------
+// Task reminders and push-connection ledger
+// ---------------------------------------------------------------------------
+
+// Reminders older than this are stale; a closed app that never synced them
+// should not wake the phone with yesterday's alarms.
+export const REMINDER_LOOKBACK = DAY;
+// A claim left in "sending" (for example after an isolate crash) can be retried
+// after this long instead of blocking the reminder forever.
+const REMINDER_CLAIM_TTL = 5 * 60_000;
+const REMINDER_LEDGER_RETENTION = 3 * DAY;
+const EXPIRED_ENDPOINT_RETENTION = 180 * DAY;
+
+let notificationLedgerReady = false;
+
+// Created lazily so the Worker keeps delivering reminders even when it is
+// deployed before migrations/0009_notification_ledger.sql has been applied.
+export async function ensureNotificationLedger(env) {
+  if (notificationLedgerReady) return;
+  await env.DB.batch([
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS reminder_deliveries (user_id TEXT NOT NULL, task_id TEXT NOT NULL, due_at INTEGER NOT NULL, status TEXT NOT NULL, claimed_at INTEGER NOT NULL, delivered_at INTEGER, PRIMARY KEY (user_id, task_id, due_at))"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_reminder_deliveries_claimed ON reminder_deliveries(claimed_at)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS push_expired_endpoints (endpoint_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, device_name TEXT, expired_at INTEGER NOT NULL)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_push_expired_endpoints_expired ON push_expired_endpoints(expired_at)"),
+  ]);
+  notificationLedgerReady = true;
+}
+
+export function endpointHash(endpoint) {
+  return hash(`push-endpoint:${endpoint}`);
+}
+
+export async function rememberExpiredEndpoint(env, { endpoint, userId, deviceName }) {
+  if (!endpoint || !userId) return;
+  await ensureNotificationLedger(env);
+  await env.DB.prepare(
+    "INSERT INTO push_expired_endpoints (endpoint_hash, user_id, device_name, expired_at) VALUES (?, ?, ?, ?) ON CONFLICT(endpoint_hash) DO UPDATE SET user_id = excluded.user_id, device_name = excluded.device_name, expired_at = excluded.expired_at",
+  ).bind(await endpointHash(endpoint), userId, deviceName || null, Date.now()).run();
+}
+
+export function dueTaskReminders(data, now) {
+  const reminders = [];
+  const profiles = Array.isArray(data?.profiles) ? data.profiles : [];
+  for (const profile of profiles) {
+    for (const task of Array.isArray(profile?.tasks) ? profile.tasks : []) {
+      if (!task || task.done || task.notified) continue;
+      if (typeof task.id !== "string" || !task.id || task.id.length > 120) continue;
+      const due = Number(task.due);
+      if (!Number.isFinite(due) || due > now || due <= now - REMINDER_LOOKBACK) continue;
+      reminders.push({ profiles, profile, task, due });
+    }
+  }
+  return reminders.sort((left, right) => left.due - right.due);
+}
+
+function reminderPayload({ profiles, profile, task }) {
+  const assignee = task.assignee ? profiles.find((candidate) => candidate?.id === task.assignee) : null;
+  const prefix = assignee && assignee.id !== profile?.id ? `For ${clean(assignee.name, 40)}: ` : "";
+  return {
+    title: `⏰ ${String(task.title || "Reminder").slice(0, 120)}`,
+    body: prefix + (String(task.note || "").slice(0, 240) || "Reminder time!"),
+    tag: task.id,
+    requireInteraction: task.priority === "high",
+    type: "reminder",
+    taskId: task.id,
+    url: `/?tab=today&task=${encodeURIComponent(task.id)}`,
+    badgeCount: 1,
+  };
+}
+
+async function markRemindersNotified(env, row, data, tasks, now) {
+  for (const task of tasks) task.notified = true;
+  // Compare-and-swap: if a device synced (revision) or another run wrote
+  // (updated_at) since this snapshot was read, leave the newer data alone. The
+  // ledger already prevents a second push, so nothing is lost by skipping.
+  await env.DB.prepare(
+    "UPDATE user_data SET data = ?, updated_at = ? WHERE user_id = ? AND revision = ? AND updated_at = ?",
+  ).bind(JSON.stringify(data), now, row.user_id, Number(row.revision || 0), Number(row.updated_at || 0)).run();
+}
+
+async function deliverUserReminders(env, row, now, sendPush) {
+  let data;
+  try {
+    data = JSON.parse(row.data);
+  } catch {
+    return;
+  }
+  const reminders = dueTaskReminders(data, now);
+  if (!reminders.length) return;
+  const notified = [];
+  for (const reminder of reminders) {
+    const { task, due } = reminder;
+    const claim = await env.DB.prepare(
+      `INSERT INTO reminder_deliveries (user_id, task_id, due_at, status, claimed_at) VALUES (?, ?, ?, 'sending', ?)
+       ON CONFLICT(user_id, task_id, due_at) DO UPDATE SET status = 'sending', claimed_at = excluded.claimed_at
+       WHERE reminder_deliveries.status = 'sending' AND reminder_deliveries.claimed_at < ?`,
+    ).bind(row.user_id, task.id, due, now, now - REMINDER_CLAIM_TTL).run();
+    if (!changed(claim)) {
+      // Already handled: a device sync probably overwrote the notified flag.
+      const existing = await env.DB.prepare(
+        "SELECT status FROM reminder_deliveries WHERE user_id = ? AND task_id = ? AND due_at = ?",
+      ).bind(row.user_id, task.id, due).first();
+      if (existing?.status === "sent") notified.push(task);
+      continue;
+    }
+    let delivery;
+    try {
+      delivery = await sendPush(row.user_id, reminderPayload(reminder), "reminders");
+    } catch (error) {
+      console.error("Reminder push failed", { message: error instanceof Error ? error.message : String(error) });
+      delivery = { attempted: 0, sent: 0, failed: 1 };
+    }
+    if (delivery?.sent > 0) {
+      await env.DB.prepare(
+        "UPDATE reminder_deliveries SET status = 'sent', delivered_at = ? WHERE user_id = ? AND task_id = ? AND due_at = ?",
+      ).bind(Date.now(), row.user_id, task.id, due).run();
+      notified.push(task);
+      continue;
+    }
+    if (delivery?.suppressed && delivery.reason === "category") {
+      // Reminder alerts are switched off for this account: stop re-checking it
+      // every minute, but leave the task un-notified so the app still alerts.
+      await env.DB.prepare(
+        "UPDATE reminder_deliveries SET status = 'suppressed' WHERE user_id = ? AND task_id = ? AND due_at = ?",
+      ).bind(row.user_id, task.id, due).run();
+      continue;
+    }
+    // Quiet hours, no devices, or a push-service failure: release the claim so
+    // the next run retries while the reminder is still fresh.
+    await env.DB.prepare(
+      "DELETE FROM reminder_deliveries WHERE user_id = ? AND task_id = ? AND due_at = ? AND status = 'sending'",
+    ).bind(row.user_id, task.id, due).run();
+    // With no reachable device (or the whole account in quiet hours) the other
+    // reminders would get the same answer, so skip them until the next run.
+    if (!delivery?.attempted) break;
+  }
+  if (notified.length) await markRemindersNotified(env, row, data, notified, now);
+}
+
+export async function runTaskReminders(env, now, sendPush) {
+  await ensureNotificationLedger(env);
+  const rows = await env.DB.prepare("SELECT user_id, data, revision, updated_at FROM user_data").all();
+  for (const row of rows.results || []) {
+    try {
+      await deliverUserReminders(env, row, now, sendPush);
+    } catch (error) {
+      // One account's bad data must never stop everyone else's reminders.
+      console.error("Task reminder run failed for an account", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (new Date(now).getUTCMinutes() === 7) {
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM reminder_deliveries WHERE claimed_at < ?").bind(now - REMINDER_LEDGER_RETENTION),
+      env.DB.prepare("DELETE FROM push_expired_endpoints WHERE expired_at < ?").bind(now - EXPIRED_ENDPOINT_RETENTION),
+    ]);
+  }
 }
