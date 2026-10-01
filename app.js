@@ -126,10 +126,11 @@ let db = {
   renagTimer = null,
   assignee = null,
   pendingImport = null;
-const APP_VERSION = "2026.07.21-27";
+const APP_VERSION = "2026.10.01-1";
 let swRegistration = null,
   updateBannerShown = !1;
 const save = () => {
+    stampChangedTasks();
     try {
       localStorage.setItem(KEY, JSON.stringify(db));
     } catch (e) {
@@ -187,7 +188,8 @@ const save = () => {
       (db.profiles || []).forEach((e) => {
         Array.isArray(e.habits) || (e.habits = []);
       }),
-      collapseProfiles());
+      collapseProfiles(),
+      rememberTaskFingerprints());
   };
 let authRecoveryPromise = null,
   authExpiredNoticeShown = false;
@@ -374,7 +376,7 @@ function applyTheme() {
   "dark" === settings.theme
     ? (e.content = "#1a1820")
     : "hc" === settings.theme
-      ? (e.content = "#000")
+      ? (e.content = "#ffffff")
       : (e.content = "#fff7ed");
 }
 function clearNotificationBadge() {
@@ -395,7 +397,7 @@ function boot() {
         $("#fab").classList.add("hidden"),
         $("#welcome").classList.remove("hidden")),
     setupServiceWorker(),
-    refreshPushSubscription());
+    refreshPushSubscription({ force: !0 }));
 }
 function setupServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
@@ -709,8 +711,13 @@ function completeTask(e) {
     const t = findTaskOwner(e.id),
       o = t ? t.profile : getProfile();
     if (e.repeat && "none" !== e.repeat && e.due) {
-      const t = nextDue(e.due, e.repeat),
-        n = e.repeatUntil
+      // Completing a reminder that is days overdue should schedule the next
+      // upcoming occurrence, not one that is already in the past and alerts
+      // again immediately.
+      let t = nextDue(e.due, e.repeat);
+      for (let skipped = 0; t <= Date.now() && skipped < 1000; skipped++)
+        t = nextDue(t, e.repeat);
+      const n = e.repeatUntil
           ? new Date(e.repeatUntil + "T23:59:59").getTime()
           : null;
       (!n || t <= n) &&
@@ -1481,59 +1488,128 @@ function startClock() {
     checkReminders(),
     (timer = setInterval(checkReminders, 15e3)));
 }
+// Reminders that came due more than this long ago fired while Daysie was closed
+// (and were usually already delivered by push), so they are summarised quietly
+// instead of each replaying a sound when the app is opened.
+const MISSED_REMINDER_WINDOW = 5 * 60 * 1000;
 function checkReminders() {
   const e = getProfile(),
-    t = Date.now();
-  let o = !1;
-  (e.tasks.forEach((e) => {
-    !e.done &&
-      e.due &&
-      e.due <= t &&
-      !e.notified &&
-      ((e.notified = !0), (o = !0), notify(e));
-  }),
-    o && save());
+    t = Date.now(),
+    due = (e.tasks || []).filter(
+      (task) => !task.done && task.due && task.due <= t && !task.notified,
+    );
+  if (!due.length) return;
+  due.forEach((task) => (task.notified = !0));
+  save();
+  const fresh = due.filter((task) => t - task.due <= MISSED_REMINDER_WINDOW),
+    missed = due.filter((task) => t - task.due > MISSED_REMINDER_WINDOW);
+  fresh.length && notifyReminders(fresh);
+  if (missed.length)
+    toast(
+      missed.length === 1
+        ? "⏰ Missed reminder: " + missed[0].title
+        : `⏰ ${missed.length} reminders came due while Daysie was closed`,
+      missed.length === 1
+        ? missed[0].note || "It's waiting in Today's plan."
+        : missed.slice(0, 3).map((task) => task.title).join(" · ") +
+            (missed.length > 3 ? " …" : ""),
+    );
 }
-function notify(e) {
-  (playNotificationTone(),
-    vibrateReminder(),
-    toast("⏰ " + e.title, e.note || "Reminder time!"),
-    "visible" !== document.visibilityState &&
-      "Notification" in window &&
-      "granted" === Notification.permission &&
-      new Notification("⏰ " + e.title, {
-        body: e.note || "Reminder time!",
-        tag: e.id,
-        requireInteraction: "high" === e.priority,
-      }));
+function showSystemNotification(title, options = {}) {
+  if (
+    "visible" === document.visibilityState ||
+    !("Notification" in window) ||
+    "granted" !== Notification.permission
+  )
+    return;
+  // Android only allows notifications through the service worker; the page
+  // constructor throws there, which used to abort the reminder check.
+  const pageNotification = () => {
+    try {
+      new Notification(title, {
+        body: options.body,
+        tag: options.tag,
+        requireInteraction: options.requireInteraction,
+      });
+    } catch (e) {}
+  };
+  if (swRegistration?.showNotification)
+    swRegistration
+      .showNotification(title, {
+        icon: "./favicon.svg",
+        badge: "./favicon.svg",
+        ...options,
+      })
+      .catch(pageNotification);
+  else pageNotification();
 }
+function reminderNotificationOptions(task, body) {
+  return {
+    body,
+    tag: task.id,
+    requireInteraction: "high" === task.priority,
+    data: { url: `./?tab=today&task=${encodeURIComponent(task.id)}`, taskId: task.id },
+    actions: [
+      { action: "complete", title: "Complete" },
+      { action: "snooze", title: "Snooze 1 hour" },
+    ],
+  };
+}
+function notifyReminders(tasks) {
+  playNotificationTone();
+  vibrateReminder();
+  tasks.slice(0, 3).forEach((task) => toast("⏰ " + task.title, task.note || "Reminder time!"));
+  tasks.length > 3 && toast(`⏰ ${tasks.length - 3} more reminders`, "See Today's plan.");
+  tasks.forEach((task) =>
+    showSystemNotification(
+      "⏰ " + task.title,
+      reminderNotificationOptions(task, task.note || "Reminder time!"),
+    ),
+  );
+}
+// Important overdue reminders re-alert every 5 minutes while Daysie is open.
+// The last alert time is tracked per reminder because background tabs run
+// timers late, which made the old "minute is a multiple of 5" check skip nags.
+const RENAG_INTERVAL = 5 * 60 * 1000,
+  RENAG_LIMIT = 24 * 60 * 60 * 1000,
+  renagLastAlert = new Map();
 function startRenag() {
   (clearInterval(renagTimer),
     (renagTimer = setInterval(() => {
-      const e = getProfile(),
-        t = Date.now();
-      e.tasks.forEach((e) => {
+      const now = Date.now(),
+        nagging = [];
+      getProfile().tasks.forEach((task) => {
         if (
-          !e.done &&
-          "high" === e.priority &&
-          e.due &&
-          e.due < t - 3e5 &&
-          e.notified
-        ) {
-          const o = Math.floor((t - e.due) / 6e4);
-          o % 5 == 0 &&
-            (playNotificationTone(),
-            vibrateReminder(),
-            toast("⚠️ Still pending: " + e.title, `${o} minutes overdue`),
-            "visible" !== document.visibilityState &&
-              "Notification" in window &&
-              "granted" === Notification.permission &&
-              new Notification("⚠️ Important: " + e.title, {
-                body: `Still pending (${o} min overdue)`,
-                tag: e.id + "-renag",
-                requireInteraction: !0,
-              }));
-        }
+          task.done ||
+          "high" !== task.priority ||
+          !task.due ||
+          !task.notified ||
+          task.due >= now - RENAG_INTERVAL ||
+          now - task.due > RENAG_LIMIT
+        )
+          return;
+        const key = `${task.id}:${task.due}`;
+        let last = renagLastAlert.get(key);
+        // Opening the app on a long-overdue reminder waits one interval
+        // before nagging instead of alerting the moment it opens.
+        if (void 0 === last)
+          ((last = now - task.due < RENAG_INTERVAL + 6e4 ? task.due : now),
+            renagLastAlert.set(key, last));
+        if (now - last < RENAG_INTERVAL - 5e3) return;
+        renagLastAlert.set(key, now);
+        nagging.push(task);
+      });
+      if (!nagging.length) return;
+      playNotificationTone();
+      vibrateReminder();
+      nagging.forEach((task) => {
+        const minutes = Math.floor((now - task.due) / 6e4);
+        toast("⚠️ Still pending: " + task.title, `${minutes} minutes overdue`);
+        showSystemNotification("⚠️ Important: " + task.title, {
+          ...reminderNotificationOptions(task, `Still pending (${minutes} min overdue)`),
+          tag: task.id + "-renag",
+          requireInteraction: !0,
+        });
       });
     }, 6e4)));
 }
@@ -1817,6 +1893,38 @@ function mergeLocalPhotos(e) {
     e
   );
 }
+// Tasks are edited in many places (edit dialog, snooze, complete, subtasks,
+// notification actions). Rather than stamp each one, save() fingerprints every
+// task and gives changed ones a fresh updatedAt, so a cross-device merge keeps
+// the newest edit instead of whichever device happened to sync last.
+let taskFingerprints = null;
+function taskFingerprint(task) {
+  // "notified" is delivery bookkeeping, not an edit: a stale device firing an
+  // old reminder must not out-rank a snooze made elsewhere. mergeRecords keeps
+  // the flag on its own when the due time is unchanged.
+  const { updatedAt, notified, ...rest } = task;
+  return JSON.stringify(rest);
+}
+function rememberTaskFingerprints() {
+  taskFingerprints = new Map();
+  (db.profiles || []).forEach((profile) =>
+    (profile.tasks || []).forEach((task) => task?.id && taskFingerprints.set(task.id, taskFingerprint(task))),
+  );
+}
+function stampChangedTasks() {
+  if (!taskFingerprints) return rememberTaskFingerprints();
+  const now = Date.now(),
+    next = new Map();
+  (db.profiles || []).forEach((profile) =>
+    (profile.tasks || []).forEach((task) => {
+      if (!task?.id) return;
+      const fingerprint = taskFingerprint(task);
+      if (taskFingerprints.get(task.id) !== fingerprint) task.updatedAt = Math.max(now, Number(task.updatedAt || 0) + 1);
+      next.set(task.id, fingerprint);
+    }),
+  );
+  taskFingerprints = next;
+}
 function mergeRecords(local = [], cloud = []) {
   const records = new Map();
   [...cloud, ...local].forEach((record) => {
@@ -1824,14 +1932,31 @@ function mergeRecords(local = [], cloud = []) {
     const existing = records.get(record.id);
     const timestamp = Number(record.updatedAt || record.completed || record.ts || record.created || 0);
     const existingTimestamp = Number(existing?.updatedAt || existing?.completed || existing?.ts || existing?.created || 0);
-    if (!existing || timestamp >= existingTimestamp) records.set(record.id, { ...existing, ...record });
+    const winner = !existing || timestamp >= existingTimestamp ? { ...existing, ...record } : existing;
+    // A reminder that either copy already delivered for the same due time
+    // must not fire again just because the other copy won the merge.
+    if (existing && winner.due != null && Number(existing.due) === Number(record.due) && (existing.notified || record.notified))
+      winner.notified = !0;
+    records.set(record.id, winner);
   });
   return [...records.values()];
+}
+function dropDeletedTasks(tasks, trash) {
+  const deletedAt = new Map();
+  (trash || []).forEach((item) => {
+    if (item?.type === "task" && item.value?.id)
+      deletedAt.set(item.value.id, Math.max(deletedAt.get(item.value.id) || 0, Number(item.deletedAt || 0)));
+  });
+  return tasks.filter((task) => {
+    const removed = deletedAt.get(task.id);
+    return !removed || Number(task.updatedAt || task.created || 0) > removed;
+  });
 }
 function mergeCloudPayload(local, cloud) {
   const localProfiles = local.profiles || [];
   const cloudProfiles = cloud.profiles || [];
   const profileIds = new Set([...localProfiles, ...cloudProfiles].map((profile) => profile.id));
+  const trash = mergeRecords(local.trash, cloud.trash);
   const profiles = [...profileIds].map((profileId) => {
     const left = localProfiles.find((profile) => profile.id === profileId) || {};
     const right = cloudProfiles.find((profile) => profile.id === profileId) || {};
@@ -1839,7 +1964,9 @@ function mergeCloudPayload(local, cloud) {
       ...right,
       ...left,
       id: profileId,
-      tasks: mergeRecords(left.tasks, right.tasks),
+      // Without this, a task deleted on one device came back from another
+      // device's copy on the next merge (and could remind again).
+      tasks: dropDeletedTasks(mergeRecords(left.tasks, right.tasks), trash),
       entries: mergeRecords(left.entries, right.entries),
       habits: mergeRecords(left.habits, right.habits),
     };
@@ -1850,7 +1977,7 @@ function mergeCloudPayload(local, cloud) {
     profiles,
     lists: mergeRecords(local.lists, cloud.lists),
     routines: mergeRecords(local.routines, cloud.routines),
-    trash: mergeRecords(local.trash, cloud.trash),
+    trash,
     tourDone: Boolean(local.tourDone || cloud.tourDone),
   };
 }
@@ -1879,12 +2006,9 @@ async function uploadPhotosToR2(e) {
       try {
         const original = await (await fetch(o)).blob(),
           e = await compressPhotoBlob(original),
-          n = await fetch(`${API}/photo`, {
+          n = await daysieAuthenticatedFetch(`${API}/photo`, {
             method: "POST",
-            headers: {
-              "Content-Type": e.type || "image/jpeg",
-              Authorization: `Bearer ${settings.authToken}`,
-            },
+            headers: { "Content-Type": e.type || "image/jpeg" },
             body: e,
           });
         if (n.ok) {
@@ -1925,12 +2049,9 @@ async function syncToCloud(force = false) {
   settings.syncState = "syncing";
   updateSyncStatus();
   try {
-      const response = await fetch("https://daysie-api.neil27.workers.dev/data", {
+      const response = await daysieAuthenticatedFetch(`${API}/data`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${settings.authToken}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           profiles: stripPhotosForSync(db.profiles),
           lists: db.lists || [],
@@ -1954,6 +2075,7 @@ async function syncToCloud(force = false) {
         db.routines = merged.routines;
         db.trash = merged.trash;
         db.tourDone = merged.tourDone;
+        rememberTaskFingerprints();
         settings.syncRevision = result.revision;
         localStorage.setItem(KEY, JSON.stringify(db));
         saveSettings();
@@ -1968,7 +2090,8 @@ async function syncToCloud(force = false) {
       saveSettings();
     } catch (error) {
       settings.syncPending = true;
-      settings.syncState = "offline";
+      // A session that could not be renewed is not an "offline" problem.
+      settings.syncState = settings.authToken ? "offline" : "signed-out";
       saveSettings();
       console.error("Sync error:", error);
     } finally {
@@ -1993,6 +2116,7 @@ function applyCloudPayload(payload) {
     db.profiles.forEach((profile) => { if (!Array.isArray(profile.habits)) profile.habits = []; });
     collapseProfiles();
   }
+  rememberTaskFingerprints();
   settings.syncRevision = Number(payload._sync?.revision || 0);
   settings.syncPending = false;
   settings.syncState = "idle";
@@ -2004,9 +2128,7 @@ function applyCloudPayload(payload) {
 async function pullFromCloud() {
   if (settings.authToken)
     try {
-      const e = await fetch("https://daysie-api.neil27.workers.dev/data", {
-        headers: { Authorization: `Bearer ${settings.authToken}` },
-      });
+      const e = await daysieAuthenticatedFetch(`${API}/data`, { cache: "no-store" });
       if (e.ok) {
         const t = await e.json();
         applyCloudPayload(t);
@@ -2015,6 +2137,41 @@ async function pullFromCloud() {
       console.error("Pull error:", e);
     }
 }
+// Brings in changes made on other devices without discarding unsynced local
+// edits (unlike pullFromCloud, which replaces local data). Used when Daysie
+// returns to the foreground and when a notification names a task this device
+// has not seen yet.
+let lastCloudMergeAt = 0;
+async function mergeFromCloud({ force = false } = {}) {
+  if (!settings.authToken || !navigator.onLine || cloudSyncActive) return !1;
+  if (!force && Date.now() - lastCloudMergeAt < 5 * 60 * 1000) return !1;
+  lastCloudMergeAt = Date.now();
+  try {
+    const response = await daysieAuthenticatedFetch(`${API}/data`, { cache: "no-store" });
+    if (!response.ok) return !1;
+    const cloud = await response.json();
+    const revision = Number(cloud?._sync?.revision || 0);
+    if (!cloud?.profiles?.length || revision <= Number(settings.syncRevision || 0) || cloudSyncActive) return !1;
+    const merged = mergeCloudPayload(db, cloud);
+    db.profiles = mergeLocalPhotos(merged.profiles);
+    db.lists = merged.lists;
+    db.routines = merged.routines;
+    db.trash = merged.trash;
+    db.tourDone = merged.tourDone;
+    collapseProfiles();
+    rememberTaskFingerprints();
+    settings.syncRevision = revision;
+    localStorage.setItem(KEY, JSON.stringify(db));
+    saveSettings();
+    renderAll();
+    scheduleCloudSync();
+    return !0;
+  } catch (error) {
+    console.error("Cloud merge error:", error);
+    return !1;
+  }
+}
+window.mergeDaysieFromCloud = mergeFromCloud;
 window.addEventListener("online", () => settings.authToken && settings.syncPending && syncToCloud());
 window.addEventListener("offline", () => { if (settings.authToken) { settings.syncState = "offline"; updateSyncStatus(); } });
 ($("#enableSyncBtn") && ($("#enableSyncBtn").onclick = async () => {
@@ -2288,16 +2445,77 @@ function notificationDeviceName() {
   const device = /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android" : /Macintosh/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : "device";
   return `${browser} on ${device}`;
 }
-async function enableNotifications() {
+const VAPID_PUBLIC_KEY =
+  "BCbfGHSDEXclbsTnL3DjwZxyaLTXhlge4D6wNonqGwOfkLgA19fFyfz7j0nmBD0GxQJp4MNDPfWigOzFvLCyinU";
+// Long-lived PWAs can sit in memory for days, so the push connection is
+// re-checked whenever Daysie comes back to the foreground, not only on launch.
+const PUSH_REFRESH_INTERVAL = 6 * 60 * 60 * 1000;
+let pushRefreshPromise = null,
+  lastPushRefreshAt = 0;
+function serviceWorkerReady(timeout = 10000) {
+  return Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Daysie's offline helper is not running yet. Reload and try again.")), timeout),
+    ),
+  ]);
+}
+function usesCurrentPushKey(subscription) {
+  const current = subscription?.options?.applicationServerKey;
+  if (!current) return true;
+  const actual = new Uint8Array(current),
+    expected = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
+  return actual.length === expected.length && actual.every((byte, index) => byte === expected[index]);
+}
+async function registerPushSubscription({ fresh = false } = {}) {
+  const registration = await serviceWorkerReady();
+  let subscription = await registration.pushManager.getSubscription(),
+    replaces = "";
+  // A subscription made with an old key, or one the push service already
+  // dropped, can still be returned by the browser. Replace it instead of
+  // re-registering a connection that will never deliver.
+  if (subscription && (fresh || !usesCurrentPushKey(subscription))) {
+    replaces = subscription.endpoint;
+    await subscription.unsubscribe().catch(() => {});
+    subscription = null;
+  }
+  if (!subscription)
+    subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: !0,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+    });
+  const response = await daysieAuthenticatedFetch(`${API}/push/subscribe`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      subscription,
+      deviceName: notificationDeviceName(),
+      ...(replaces && replaces !== subscription.endpoint ? { replaces } : {}),
+    }),
+  });
+  if (response.status === 410 && !fresh) return registerPushSubscription({ fresh: !0 });
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    throw new Error(result.error || "Closed-app reminders couldn't be registered.");
+  }
+  settings.pushSubscription = subscription.toJSON ? subscription.toJSON() : subscription;
+  saveSettings();
+  lastPushRefreshAt = Date.now();
+  return subscription;
+}
+async function enableNotifications({ fresh = false } = {}) {
   if (isIOS() && !isStandalone())
-    return toast(
-      "📲 Add Daysie to your Home Screen",
-      'On iPhone, notifications only work after you add Daysie to your Home Screen (tap Share, then "Add to Home Screen") and open it from there.',
+    return (
+      toast(
+        "📲 Add Daysie to your Home Screen",
+        'On iPhone, notifications only work after you add Daysie to your Home Screen (tap Share, then "Add to Home Screen") and open it from there.',
+      ),
+      !1
     );
   if (!("Notification" in window))
-    return toast(
-      "Notifications unavailable",
-      "This browser does not support them.",
+    return (
+      toast("Notifications unavailable", "This browser does not support them."),
+      !1
     );
   let e = Notification.permission;
   if (
@@ -2305,92 +2523,84 @@ async function enableNotifications() {
     showNotifyBanner(),
     "denied" === e)
   )
-    return toast(
-      "🔔 Notifications are blocked",
-      "Allow them for Daysie in your browser settings, then try again.",
+    return (
+      toast(
+        "🔔 Notifications are blocked",
+        "Allow them for Daysie in your browser settings, then try again.",
+      ),
+      !1
     );
   if ("granted" !== e)
-    return toast(
-      "No problem",
-      "In-app alerts will still show while Daysie is open.",
+    return (
+      toast("No problem", "In-app alerts will still show while Daysie is open."),
+      !1
     );
   if (!("serviceWorker" in navigator) || !("PushManager" in window))
-    return toast("🔔 Reminders on!", "Alerts will show while Daysie is open.");
+    return (
+      toast("🔔 Reminders on!", "Alerts will show while Daysie is open."),
+      !1
+    );
   if (!settings.authToken)
-    return toast(
-      "🔔 Reminders on for this device",
-      "Turn on sync to get reminders when Daysie is closed.",
+    return (
+      toast(
+        "🔔 Reminders on for this device",
+        "Turn on sync to get reminders when Daysie is closed.",
+      ),
+      !1
     );
   toast("🔔 Setting up notifications…", "");
   try {
-    const e = await navigator.serviceWorker.ready,
-      t = await e.pushManager.subscribe({
-        userVisibleOnly: !0,
-        applicationServerKey: urlBase64ToUint8Array(
-          "BCbfGHSDEXclbsTnL3DjwZxyaLTXhlge4D6wNonqGwOfkLgA19fFyfz7j0nmBD0GxQJp4MNDPfWigOzFvLCyinU",
-        ),
-      });
-    (
-      await daysieAuthenticatedFetch(`${API}/push/subscribe`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${settings.authToken}`,
-        },
-        body: JSON.stringify({ subscription: t, deviceName: notificationDeviceName() }),
-      })
-    ).ok
-      ? ((settings.pushSubscription = t),
-        saveSettings(),
-        await syncToCloud(),
-        toast(
-          "🔔 Notifications on!",
-          "You'll get reminders even when Daysie is closed.",
-        ))
-      : toast(
-          "🔔 Reminders on for this device",
-          "Closed-app reminders couldn't be registered, but alerts show while Daysie is open.",
-        );
-  } catch (e) {
-    (console.error(e),
-      toast(
-        "🔔 Reminders on for this device",
-        "Closed-app reminders couldn't be set up, but alerts show while Daysie is open.",
-      ));
-  }
-}
-async function refreshPushSubscription() {
-  try {
-    if (!settings.authToken) return;
-    if (!("Notification" in window) || "granted" !== Notification.permission)
-      return;
-    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
-    if (isIOS() && !isStandalone()) return;
-    const e = await navigator.serviceWorker.ready;
-    let t = await e.pushManager.getSubscription();
-    if (!t)
-      t = await e.pushManager.subscribe({
-        userVisibleOnly: !0,
-        applicationServerKey: urlBase64ToUint8Array(
-          "BCbfGHSDEXclbsTnL3DjwZxyaLTXhlge4D6wNonqGwOfkLgA19fFyfz7j0nmBD0GxQJp4MNDPfWigOzFvLCyinU",
-        ),
-      });
-    settings.pushSubscription = t;
-    saveSettings();
-    const response = await daysieAuthenticatedFetch(`${API}/push/subscribe`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${settings.authToken}`,
-      },
-      body: JSON.stringify({ subscription: t, deviceName: notificationDeviceName() }),
-    });
-    if (!response.ok) throw new Error("Push subscription could not be refreshed");
+    settings.pushRemoved = !1;
+    await registerPushSubscription({ fresh });
     await syncToCloud();
+    toast(
+      "🔔 Notifications on!",
+      "You'll get reminders even when Daysie is closed.",
+    );
+    return !0;
   } catch (e) {
-    console.error("Push refresh error:", e);
+    console.error(e);
+    toast(
+      "🔔 Reminders on for this device",
+      "Closed-app reminders couldn't be set up, but alerts show while Daysie is open.",
+    );
+    return !1;
   }
 }
+async function refreshPushSubscription({ force = false } = {}) {
+  if (!settings.authToken || settings.pushRemoved) return !1;
+  if (!("Notification" in window) || "granted" !== Notification.permission)
+    return !1;
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return !1;
+  if (isIOS() && !isStandalone()) return !1;
+  if (!force && Date.now() - lastPushRefreshAt < PUSH_REFRESH_INTERVAL) return !0;
+  if (pushRefreshPromise) return pushRefreshPromise;
+  pushRefreshPromise = (async () => {
+    try {
+      await registerPushSubscription();
+      await syncToCloud();
+      return !0;
+    } catch (e) {
+      console.error("Push refresh error:", e);
+      return !1;
+    } finally {
+      pushRefreshPromise = null;
+    }
+  })();
+  return pushRefreshPromise;
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  showNotifyBanner();
+  refreshPushSubscription();
+  mergeFromCloud();
+});
+window.addEventListener("online", () => refreshPushSubscription());
+"serviceWorker" in navigator &&
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    event.data?.type === "push-subscription-changed" &&
+      refreshPushSubscription({ force: !0 });
+  });
 function urlBase64ToUint8Array(e) {
   const t = (e + "=".repeat((4 - (e.length % 4)) % 4))
       .replace(/-/g, "+")

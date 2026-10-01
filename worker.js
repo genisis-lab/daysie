@@ -6,8 +6,12 @@ import {
 } from "./auth.js";
 import { handlePowerRequest } from "./power-worker.js";
 import {
+  endpointHash,
+  ensureNotificationLedger,
   handleReliabilityRequest,
+  rememberExpiredEndpoint,
   runReliabilitySchedule,
+  runTaskReminders,
 } from "./reliability-worker.js";
 import { WorkflowEntrypoint } from "cloudflare:workers";
 
@@ -553,9 +557,12 @@ export default {
           for (const photo of photos.results || []) await E.PHOTOS.delete(photo.key);
         }
         const family = await E.DB.prepare("SELECT family_id FROM family_members WHERE user_id = ?").bind(userId).first();
+        await ensureNotificationLedger(E);
         await E.DB.batch([
           E.DB.prepare("DELETE FROM user_data WHERE user_id = ?").bind(userId),
           E.DB.prepare("DELETE FROM push_subscriptions WHERE user_id = ?").bind(userId),
+          E.DB.prepare("DELETE FROM push_expired_endpoints WHERE user_id = ?").bind(userId),
+          E.DB.prepare("DELETE FROM reminder_deliveries WHERE user_id = ?").bind(userId),
           E.DB.prepare("DELETE FROM photo_access WHERE user_id = ?").bind(userId),
           E.DB.prepare("DELETE FROM recovery_codes WHERE user_id = ?").bind(userId),
           E.DB.prepare("DELETE FROM notification_preferences WHERE user_id = ?").bind(userId),
@@ -589,6 +596,15 @@ export default {
         const now = Date.now();
         const endpoint = String(subscription.endpoint);
         const deviceName = d(body.deviceName, 48) || friendlyDeviceName(e.headers.get("User-Agent"));
+        await ensureNotificationLedger(E);
+        const expired = await E.DB.prepare("SELECT 1 AS expired FROM push_expired_endpoints WHERE endpoint_hash = ?")
+          .bind(await endpointHash(endpoint))
+          .first();
+        if (expired)
+          return c({ error: "This device's notification connection expired. Reconnect it to keep getting reminders.", expired: true }, 410, m);
+        const replaces = typeof body.replaces === "string" && body.replaces.length <= 2048 ? body.replaces : "";
+        if (replaces && replaces !== endpoint)
+          await E.DB.prepare("DELETE FROM push_subscriptions WHERE user_id = ? AND endpoint = ?").bind(userId, replaces).run();
         await E.DB.prepare(
           `INSERT INTO push_subscriptions (id, user_id, endpoint, subscription, device_name, user_agent, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -597,6 +613,43 @@ export default {
         ).bind(crypto.randomUUID(), userId, endpoint, JSON.stringify(subscription), deviceName, e.headers.get("User-Agent"), now, now).run();
         const count = await E.DB.prepare("SELECT COUNT(*) AS count FROM push_subscriptions WHERE user_id = ?").bind(userId).first();
         return c({ success: true, devices: Number(count?.count || 0) }, 200, m);
+      }
+      if ("/push/resubscribe" === p && "POST" === e.method) {
+        // Called by the service worker when the browser rotates a push
+        // subscription while Daysie is closed. The worker has no session, so
+        // the previous endpoint (a capability URL only this device and Daysie
+        // know) proves which device is being replaced.
+        const ip = e.headers.get("CF-Connecting-IP") || "unknown";
+        if (!(await u(E, `push-resubscribe:${ip}`, 10, 60 * 60 * 1000)))
+          return c({ error: "Too many requests" }, 429, m);
+        const body = await q(e, 16 * 1024);
+        const oldEndpoint = typeof body.oldEndpoint === "string" ? body.oldEndpoint : "";
+        const subscription = body.subscription;
+        if (!oldEndpoint || oldEndpoint.length > 2048 || !isSafePushEndpoint({ endpoint: oldEndpoint }) || !isValidPushSubscription(subscription))
+          return c({ error: "Invalid push subscription" }, 400, m);
+        const endpoint = String(subscription.endpoint);
+        if (endpoint === oldEndpoint) return c({ success: true }, 200, m);
+        await ensureNotificationLedger(E);
+        const oldHash = await endpointHash(oldEndpoint);
+        const current = await E.DB.prepare("SELECT user_id, device_name, enabled FROM push_subscriptions WHERE endpoint = ?")
+          .bind(oldEndpoint)
+          .first();
+        const owner = current || (await E.DB.prepare("SELECT user_id, device_name FROM push_expired_endpoints WHERE endpoint_hash = ?")
+          .bind(oldHash)
+          .first());
+        if (!owner?.user_id) return c({ error: "Notification device not found" }, 404, m);
+        const now = Date.now();
+        await E.DB.batch([
+          E.DB.prepare("DELETE FROM push_subscriptions WHERE endpoint = ?").bind(oldEndpoint),
+          E.DB.prepare("DELETE FROM push_expired_endpoints WHERE endpoint_hash = ?").bind(oldHash),
+          E.DB.prepare(
+            `INSERT INTO push_subscriptions (id, user_id, endpoint, subscription, device_name, user_agent, created_at, updated_at, enabled)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, subscription = excluded.subscription,
+               device_name = excluded.device_name, user_agent = excluded.user_agent, updated_at = excluded.updated_at, enabled = excluded.enabled`,
+          ).bind(crypto.randomUUID(), owner.user_id, endpoint, JSON.stringify(subscription), owner.device_name || friendlyDeviceName(e.headers.get("User-Agent")), e.headers.get("User-Agent"), now, now, current && current.enabled === 0 ? 0 : 1),
+        ]);
+        return c({ success: true }, 200, m);
       }
       if ("/push/status" === p && "GET" === e.method) {
         const userId = await r(e, E);
@@ -1367,53 +1420,31 @@ export default {
     }
   },
   async scheduled(e, r, t) {
+    const now = Date.now();
+    const sendPush = (targetUserId, payload, category) =>
+      sendPushToUser(r, targetUserId, payload, category, now);
+    // Each phase is isolated so a failure in one never silences the others.
     try {
-      const e = Date.now(),
-        t = await r.DB.prepare("SELECT user_id, data FROM user_data").all();
-      for (const { user_id: i, data: a } of t.results) {
-        const t = JSON.parse(a),
-          n = t.profiles || [];
-        for (const t of n) {
-          const a = t.tasks || [];
-          for (const s of a)
-            if (!s.done && s.due && s.due <= e && !s.notified) {
-              const o = s.assignee ? n.find((profile) => profile.id === s.assignee) : null,
-                prefix = o && o.id !== t.id ? `For ${o.name}: ` : "",
-                delivery = await sendPushToUser(r, i, {
-                  title: "⏰ " + s.title,
-                  body: prefix + (s.note || "Reminder time!"),
-                  tag: s.id,
-                  requireInteraction: "high" === s.priority,
-                  type: "reminder",
-                  taskId: s.id,
-                  url: `/?tab=today&task=${encodeURIComponent(s.id)}`,
-                  badgeCount: 1,
-                }, "reminders", e);
-              delivery.sent > 0 && (s.notified = true);
-            }
-        }
-        await r.DB.prepare(
-          "UPDATE user_data SET data = ?, updated_at = ? WHERE user_id = ?",
-        )
-          .bind(JSON.stringify(t), e, i)
-          .run();
-      }
+      await runTaskReminders(r, now, sendPush);
+    } catch (error) {
+      console.error("Scheduled reminder error:", error);
+    }
+    try {
       const n = await r.DB.prepare(
         "SELECT id, to_user, from_user, kind, payload FROM assigned_items WHERE notified = 0 AND status = 'pending' AND fire_at <= ?",
       )
-        .bind(e)
+        .bind(now)
         .all();
-      for (const e of n.results) {
-        await a(r, e);
+      for (const item of n.results || []) {
+        await a(r, item);
       }
-      await runReliabilitySchedule(
-        r,
-        e,
-        (targetUserId, payload, category) =>
-          sendPushToUser(r, targetUserId, payload, category, e),
-      );
-    } catch (e) {
-      console.error("Scheduled push error:", e);
+    } catch (error) {
+      console.error("Scheduled assignment error:", error);
+    }
+    try {
+      await runReliabilitySchedule(r, now, sendPush);
+    } catch (error) {
+      console.error("Scheduled push error:", error);
     }
   },
   async queue(batch, env) {
@@ -1667,13 +1698,13 @@ async function notificationPolicy(env, userId, category, timestamp = Date.now())
   if (category === "family") {
     const availability = await env.DB.prepare("SELECT dnd_until FROM family_members WHERE user_id = ?").bind(userId).first();
     if (Number(availability?.dnd_until || 0) > timestamp)
-      return { ...policy, allowed: false };
+      return { ...policy, allowed: false, reason: "dnd" };
   }
   if (!row) return policy;
   try {
     const categories = JSON.parse(row.categories || "{}");
     if (category !== "test" && categories[category] === false)
-      return { ...policy, allowed: false };
+      return { ...policy, allowed: false, reason: "category" };
   } catch {}
   if (category === "test" || !row.quiet_start || !row.quiet_end) return policy;
   const timeZone = validTimezone(row.timezone) ? row.timezone : "UTC";
@@ -1682,15 +1713,15 @@ async function notificationPolicy(env, userId, category, timestamp = Date.now())
   const allowed = row.quiet_start < row.quiet_end
     ? !(current >= row.quiet_start && current < row.quiet_end)
     : !(current >= row.quiet_start || current < row.quiet_end);
-  return { ...policy, allowed };
+  return allowed ? policy : { ...policy, allowed, reason: "quiet-hours" };
 }
 
 async function sendPushToUser(env, userId, payload, category = "reminders", timestamp = Date.now(), bypassQuietHours = false) {
   const policy = await notificationPolicy(env, userId, category, timestamp);
   if (!policy.allowed && !bypassQuietHours)
-    return { attempted: 0, sent: 0, failed: 0, suppressed: true };
+    return { attempted: 0, sent: 0, failed: 0, suppressed: true, reason: policy.reason };
   const rows = await env.DB.prepare(
-    "SELECT id, subscription FROM push_subscriptions WHERE user_id = ? AND enabled != 0 ORDER BY updated_at DESC",
+    "SELECT id, endpoint, device_name, subscription FROM push_subscriptions WHERE user_id = ? AND enabled != 0 ORDER BY updated_at DESC",
   ).bind(userId).all();
   let sent = 0,
     failed = 0;
@@ -1715,9 +1746,17 @@ async function sendPushToUser(env, userId, payload, category = "reminders", time
       ).bind(Date.now(), status, row.id).run();
     } else {
       failed++;
-      if (status === 404 || status === 410)
+      if (status === 404 || status === 410) {
         await env.DB.prepare("DELETE FROM push_subscriptions WHERE id = ?").bind(row.id).run();
-      else
+        // Browsers can keep handing out a subscription the push service has
+        // already dropped. Remembering it lets that device re-subscribe the
+        // next time it checks in instead of silently re-registering a dead one.
+        try {
+          await rememberExpiredEndpoint(env, { endpoint: row.endpoint, userId, deviceName: row.device_name });
+        } catch (error) {
+          console.error("Could not record expired push endpoint", error);
+        }
+      } else
         await env.DB.prepare(
           "UPDATE push_subscriptions SET last_failure_at = ?, last_status = ? WHERE id = ?",
         ).bind(Date.now(), status, row.id).run();
